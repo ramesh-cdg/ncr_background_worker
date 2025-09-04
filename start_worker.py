@@ -83,8 +83,8 @@ def start_flower():
         'celery',
         '-A', 'celery_app',
         'flower',
-        '--port', '5555',
-        '--broker', settings.celery_broker_url
+        '--port=5555',
+        f'--broker={settings.celery_broker_url}'
     ]
     
     print("Starting Flower monitoring on http://localhost:5555")

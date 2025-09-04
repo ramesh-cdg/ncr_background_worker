@@ -40,14 +40,10 @@ async def root():
 
 @router.post("/process-job", response_model=JobResponse)
 async def process_job(job_request: JobRequest):
-    """Process a job using Celery"""
+    """Process a job using Celery - always queue the job"""
     try:
-        # Check memory availability
-        if not memory_manager.should_accept_new_job():
-            raise HTTPException(
-                status_code=503, 
-                detail="Server memory usage is high. Please try again later."
-            )
+        # Always queue the job - Celery will handle memory management
+        # No need to check memory here as Celery has built-in concurrency control
         
         # Generate unique task ID
         task_id = str(uuid.uuid4())

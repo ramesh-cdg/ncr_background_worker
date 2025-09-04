@@ -12,8 +12,8 @@ DB_PASS=C!0ud$24
 DB_NAME=ncr3d_crm
 
 # Redis Configuration
-REDIS_HOST=localhost
-REDIS_PORT=6380
+REDIS_HOST=redis
+REDIS_PORT=6379
 REDIS_DB=0
 
 # SFTP Configuration
@@ -27,6 +27,14 @@ API_TITLE=NCR Upload API
 API_VERSION=1.0.0
 API_HOST=0.0.0.0
 API_PORT=8001
+
+# Gunicorn Configuration
+GUNICORN_WORKERS=4
+GUNICORN_WORKER_CLASS=uvicorn.workers.UvicornWorker
+GUNICORN_TIMEOUT=120
+GUNICORN_KEEPALIVE=2
+GUNICORN_MAX_REQUESTS=1000
+GUNICORN_MAX_REQUESTS_JITTER=100
 
 # Validator API Configuration
 VALIDATOR_API_URL=https://bond-api.nextechar.com/api/validator/validate

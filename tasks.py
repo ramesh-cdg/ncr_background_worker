@@ -31,9 +31,8 @@ def process_job_task(
     task_id = self.request.id
     
     try:
-        # Check memory before starting
-        if not memory_manager.should_accept_new_job():
-            raise Retry('Insufficient memory available', countdown=60, max_retries=3)
+        # Celery handles concurrency control - no need to check memory here
+        # The worker will only pick up tasks when it has capacity
         
         # Update status to processing
         redis_manager.update_job_status(task_id, JobStatus.PROCESSING, "Starting job processing")
@@ -76,9 +75,9 @@ def process_job_task(
             
             # Download and prepare output files
             for key, val in outputs.items():
-                # Check memory during processing
-                if not memory_manager.is_memory_available():
-                    raise Exception("Insufficient memory during file processing")
+                # Light memory check - only fail if memory is critically high
+                if memory_manager.get_memory_usage()['system_memory_percent'] > 95:
+                    raise Exception("Critical memory usage during file processing")
                 
                 redis_manager.update_job_status(
                     task_id, 

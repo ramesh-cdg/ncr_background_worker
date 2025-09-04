@@ -80,9 +80,25 @@ health_check() {
     error "$service failed health check after $max_attempts attempts"
 }
 
+# Clean up existing containers
+cleanup_containers() {
+    log "Cleaning up existing containers..."
+    
+    # Stop and remove existing containers
+    docker compose down --remove-orphans
+    
+    # Remove any dangling containers
+    docker container prune -f
+    
+    log "Container cleanup completed"
+}
+
 # Zero-downtime deployment
 deploy() {
-    log "Starting zero-downtime deployment..."
+    log "Starting deployment..."
+    
+    # Clean up existing containers
+    cleanup_containers
     
     # Pull latest images
     log "Pulling latest images..."
@@ -95,36 +111,25 @@ deploy() {
     # Create backup before deployment
     create_backup
     
-    # Start new worker instances (rolling update)
-    log "Starting new worker instances..."
-    docker compose up -d --scale worker=4 --no-recreate worker
+    # Stop existing services first to avoid port conflicts
+    log "Stopping existing services..."
+    docker compose down
     
-    # Wait for new workers to be healthy
-    health_check "worker"
+    # Start services with new configuration
+    log "Starting services with new configuration..."
+    docker compose up -d
     
-    # Scale down old workers
-    log "Scaling down old workers..."
-    docker compose up -d --scale worker=2 --no-recreate worker
-    
-    # Update web services (rolling update)
-    log "Updating web services..."
-    docker compose up -d --scale web=3 --no-recreate web
-    
-    # Wait for new web instances to be healthy
+    # Wait for services to be healthy
+    health_check "redis"
     health_check "web"
-    
-    # Scale down old web instances
-    log "Scaling down old web instances..."
-    docker compose up -d --scale web=2 --no-recreate web
-    
-    # Update other services
-    log "Updating other services..."
-    docker compose up -d beat flower
+    health_check "worker"
     
     # Final health check
     log "Performing final health check..."
     health_check "web"
     health_check "worker"
+    health_check "beat"
+    health_check "flower"
     
     log "Deployment completed successfully!"
 }

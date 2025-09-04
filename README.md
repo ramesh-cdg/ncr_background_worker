@@ -1,17 +1,18 @@
 # NCR Upload API
 
-A production-ready FastAPI application with Celery for robust background job processing, featuring automatic memory management, batch processing, and zero-downtime deployments.
+A production-ready FastAPI application with Celery for robust background job processing, featuring intelligent queueing, automatic memory management, and zero-downtime deployments.
 
 ## Features
 
 - **🚀 Celery Background Processing**: Robust, scalable background job processing with Redis
-- **🧠 Smart Memory Management**: Automatic memory monitoring and job throttling
+- **📋 Smart Queueing**: Always accepts jobs - Celery handles concurrency and memory management
+- **🧠 Automatic Memory Management**: Built-in memory monitoring and worker recycling
 - **📦 Batch Processing**: Process multiple jobs efficiently with memory-aware batching
 - **🔄 Zero-Downtime Deployments**: Rolling updates without service interruption
 - **📊 Real-time Monitoring**: Flower dashboard and comprehensive health checks
 - **🛡️ Production Ready**: Docker containers, health checks, and automatic recovery
 - **📁 File Processing**: Wasabi S3 downloads, validation, and SFTP uploads
-- **⚡ High Performance**: Optimized for memory usage and concurrent processing
+- **⚡ High Performance**: Gunicorn workers with optimized concurrency control
 
 ## Project Structure
 
@@ -29,6 +30,7 @@ ncr_background_worker/
 ├── celery_app.py              # Celery application configuration
 ├── tasks.py                   # Celery tasks with memory management
 ├── start_worker.py            # Celery worker startup script
+├── gunicorn.conf.py           # Gunicorn configuration
 ├── docker-compose.yml         # Production Docker setup
 ├── Dockerfile                 # Application container
 ├── deploy.sh                  # Zero-downtime deployment script
@@ -75,6 +77,15 @@ chmod +x deploy.sh
 - **API Docs**: http://localhost:8001/docs
 - **Flower Monitoring**: http://localhost:5555
 - **Redis**: localhost:6380
+
+### 4. Architecture Overview
+
+The application uses a modern microservices architecture:
+
+- **FastAPI Web Service**: 4 Gunicorn workers handling HTTP requests
+- **Celery Workers**: 4 background workers processing jobs
+- **Redis**: Message broker and job queue storage
+- **Smart Queueing**: Always accepts jobs, Celery manages concurrency
 
 ## Development Setup
 
@@ -154,6 +165,17 @@ curl -X POST "http://localhost:8001/process-job" \
      }'
 ```
 
+**Response:**
+```json
+{
+  "task_id": "uuid-task-id",
+  "status": "queued",
+  "message": "Job queued for processing"
+}
+```
+
+**Note:** Jobs are always accepted and queued. The system will process them when workers are available.
+
 ### Batch Processing
 
 ```bash
@@ -194,15 +216,15 @@ curl "http://localhost:8001/health"
 ## Job Processing Flow
 
 1. **Job Creation**: Client sends job request to `/process-job`
-2. **Memory Check**: System checks available memory before accepting job
-3. **Celery Task**: Job is queued in Celery with automatic retry logic
+2. **Immediate Queueing**: Job is always accepted and queued in Redis
+3. **Celery Processing**: Worker picks up job when available (concurrency controlled)
 4. **File Retrieval**: Files are retrieved from database and Wasabi S3
 5. **Structure Organization**: Files are organized according to business logic
 6. **Validation**: Files are zipped and sent to validator API
 7. **Upload**: If validation passes, files are uploaded to SFTP server
 8. **Status Updates**: Real-time status updates via Redis
 9. **Cleanup**: Temporary files are cleaned up automatically
-10. **Memory Management**: Worker memory is monitored and managed
+10. **Memory Management**: Automatic worker recycling and memory monitoring
 
 ## Configuration
 
@@ -215,14 +237,23 @@ All configuration is managed through environment variables. See the `env_sample`
 API_PORT=8001
 API_HOST=0.0.0.0
 
+# Gunicorn Configuration
+GUNICORN_WORKERS=4
+GUNICORN_WORKER_CLASS=uvicorn.workers.UvicornWorker
+GUNICORN_TIMEOUT=120
+
 # Redis Configuration  
-REDIS_HOST=localhost
-REDIS_PORT=6380
+REDIS_HOST=redis
+REDIS_PORT=6379
+
+# Celery Configuration
+CELERY_WORKER_CONCURRENCY=4
+CELERY_WORKER_PREFETCH_MULTIPLIER=1
+CELERY_WORKER_MAX_MEMORY_PER_CHILD=200000
+CELERY_WORKER_MAX_TASKS_PER_CHILD=1000
 
 # Memory Management
 MAX_MEMORY_USAGE_PERCENT=80
-CELERY_WORKER_CONCURRENCY=4
-CELERY_WORKER_MAX_MEMORY_PER_CHILD=200000
 
 # Batch Processing
 BATCH_SIZE=5
@@ -314,8 +345,9 @@ Features:
 ### Automatic Features
 
 - **Memory Monitoring**: Continuous monitoring of system and process memory
-- **Job Throttling**: Automatic rejection of new jobs when memory usage > 80%
+- **Smart Queueing**: Jobs are always accepted and queued, processed when memory is available
 - **Worker Recycling**: Workers restart after 1000 tasks or 200MB memory usage
+- **Concurrency Control**: Celery manages worker concurrency based on system capacity
 - **Batch Processing**: Memory-aware batch processing with dynamic concurrency
 
 ### Configuration
@@ -363,6 +395,8 @@ All errors are logged and job status is updated accordingly.
 4. **File Download Error**: Check Wasabi S3 credentials and file permissions
 5. **Memory Issues**: Check memory stats and adjust worker concurrency
 6. **Celery Worker Issues**: Check worker logs and restart if needed
+7. **Gunicorn Issues**: Check Gunicorn configuration and worker processes
+8. **Port Conflicts**: Ensure ports 8001 and 6380 are available
 
 ### Logs
 

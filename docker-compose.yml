@@ -19,16 +19,19 @@ services:
       retries: 5
       start_period: 10s
 
-  # FastAPI Application
+  # FastAPI Application with Gunicorn
   web:
     build: 
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8001:8001"  # Changed to port 8001
+      - "8001:8001"
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379  # Internal Redis port
+      - GUNICORN_WORKERS=4
+      - GUNICORN_WORKER_CLASS=uvicorn.workers.UvicornWorker
+      - GUNICORN_BIND=0.0.0.0:8001
     env_file:
       - .env
     depends_on:
@@ -42,12 +45,11 @@ services:
       retries: 3
       start_period: 40s
     deploy:
-      replicas: 2
       resources:
         limits:
-          memory: 512M
+          memory: 1G
         reservations:
-          memory: 256M
+          memory: 512M
 
   # Celery Worker
   worker:
@@ -65,7 +67,6 @@ services:
         condition: service_healthy
     restart: unless-stopped
     deploy:
-      replicas: 2
       resources:
         limits:
           memory: 1G

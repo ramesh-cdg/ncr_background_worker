@@ -33,10 +33,14 @@ def create_celery_app() -> Celery:
         worker_max_tasks_per_child=settings.celery_worker_max_tasks_per_child,
         worker_max_memory_per_child=settings.celery_worker_max_memory_per_child,
         
+        # Concurrency Control - Let Celery handle queueing
+        worker_direct=True,  # Direct task execution without prefetching
+        task_acks_late=True,  # Acknowledge tasks only after completion
+        task_reject_on_worker_lost=True,  # Reject tasks if worker dies
+        
         # Task Configuration
         task_soft_time_limit=settings.celery_task_soft_time_limit,
         task_time_limit=settings.celery_task_time_limit,
-        task_acks_late=settings.celery_task_acks_late,
         worker_disable_rate_limits=settings.celery_worker_disable_rate_limits,
         
         # Task Routes
@@ -59,6 +63,11 @@ def create_celery_app() -> Celery:
         # Worker Settings
         worker_hijack_root_logger=False,
         worker_log_color=False,
+        
+        # Event Settings - Disable events to fix dispatcher issue
+        worker_send_task_events=False,
+        task_send_sent_event=False,
+        worker_enable_remote_control=False,
         
         # Beat Schedule (for periodic tasks)
         beat_schedule={

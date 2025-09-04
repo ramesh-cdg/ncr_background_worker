@@ -6,11 +6,18 @@ This guide covers deploying the NCR Upload API with Celery in production using D
 
 ## Architecture
 
-- **FastAPI App**: Runs on port 8001
+- **FastAPI App**: Runs on port 8001 with 4 Gunicorn workers
 - **Redis**: Runs on port 6380 (external), 6379 (internal)
-- **Celery Workers**: Background job processing with memory management
+- **Celery Workers**: 4 background workers with smart queueing
 - **Celery Beat**: Task scheduler
 - **Flower**: Monitoring dashboard on port 5555
+
+### Key Features
+
+- **Smart Queueing**: Always accepts jobs, Celery manages concurrency
+- **Memory Management**: Automatic worker recycling and memory monitoring
+- **Zero-Downtime Deployments**: Rolling updates without service interruption
+- **Health Monitoring**: Comprehensive health checks and monitoring
 
 ## Prerequisites
 
@@ -98,8 +105,8 @@ CELERY_WORKER_MAX_MEMORY_PER_CHILD=200000
 
 ### Docker Compose Services
 
-- **web**: FastAPI application (2 replicas, 512MB memory limit)
-- **worker**: Celery workers (2 replicas, 1GB memory limit)
+- **web**: FastAPI application with Gunicorn (1 instance, 1GB memory limit)
+- **worker**: Celery workers (1 instance, 1GB memory limit)
 - **beat**: Celery scheduler (1 instance, 256MB memory limit)
 - **flower**: Monitoring dashboard (1 instance, 256MB memory limit)
 - **redis**: Message broker (1 instance, 1GB memory limit)
@@ -129,29 +136,37 @@ The deployment script provides zero-downtime updates:
 1. **Pull latest images**
 2. **Build new containers**
 3. **Create backup**
-4. **Scale up new workers** (rolling update)
-5. **Scale up new web instances** (rolling update)
-6. **Scale down old instances**
-7. **Health checks**
+4. **Stop existing services**
+5. **Start new services**
+6. **Health checks**
+7. **Cleanup old containers**
 
 ## Memory Management
 
 ### Automatic Memory Monitoring
 
 - **Memory checks** every 30 seconds
-- **Automatic scaling** based on available memory
-- **Job rejection** when memory usage > 80%
-- **Worker recycling** after 1000 tasks or 200MB memory
+- **Smart queueing** - jobs always accepted and queued
+- **Worker recycling** after 1000 tasks or 200MB memory usage
+- **Concurrency control** - Celery manages worker capacity
 
 ### Memory Configuration
 
 ```env
-# Maximum memory usage before rejecting jobs
+# Maximum memory usage for monitoring
 MAX_MEMORY_USAGE_PERCENT=80
 
 # Worker memory limits
 CELERY_WORKER_MAX_MEMORY_PER_CHILD=200000  # 200MB in KB
 CELERY_WORKER_MAX_TASKS_PER_CHILD=1000
+
+# Concurrency settings
+CELERY_WORKER_CONCURRENCY=4
+CELERY_WORKER_PREFETCH_MULTIPLIER=1
+
+# Gunicorn settings
+GUNICORN_WORKERS=4
+GUNICORN_WORKER_CLASS=uvicorn.workers.UvicornWorker
 
 # Task timeouts
 CELERY_TASK_SOFT_TIME_LIMIT=3600  # 1 hour

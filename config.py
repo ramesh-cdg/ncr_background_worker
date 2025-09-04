@@ -3,7 +3,7 @@ Configuration module for NCR Upload API
 """
 import os
 from typing import Optional
-from pydantic import BaseSettings
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -23,8 +23,8 @@ class Settings(BaseSettings):
     db_name: str = "ncr3d_crm"
     
     # Redis Configuration
-    redis_host: str = "localhost"
-    redis_port: int = 6380  # External Redis port
+    redis_host: str = "redis"
+    redis_port: int = 6379  # Internal Redis port
     redis_db: int = 0
     
     # SFTP Configuration
@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8001
     
+    # Gunicorn Configuration
+    gunicorn_workers: int = 4
+    gunicorn_worker_class: str = "uvicorn.workers.UvicornWorker"
+    gunicorn_timeout: int = 120
+    gunicorn_keepalive: int = 2
+    gunicorn_max_requests: int = 1000
+    gunicorn_max_requests_jitter: int = 100
+    
     # Validator API Configuration
     validator_api_url: str = "https://bond-api.nextechar.com/api/validator/validate"
     validator_api_key: str = "13D8429DBDF8C3DD437FB35182A98_BOND"
@@ -50,8 +58,13 @@ class Settings(BaseSettings):
     job_expire_hours: int = 24
     
     # Celery Configuration
-    celery_broker_url: str = "redis://localhost:6380/0"
-    celery_result_backend: str = "redis://localhost:6380/0"
+    @property
+    def celery_broker_url(self) -> str:
+        return f"redis://{self.redis_host}:{self.redis_port}/0"
+    
+    @property
+    def celery_result_backend(self) -> str:
+        return f"redis://{self.redis_host}:{self.redis_port}/0"
     celery_task_serializer: str = "json"
     celery_result_serializer: str = "json"
     celery_accept_content: list = ["json"]
@@ -60,7 +73,7 @@ class Settings(BaseSettings):
     
     # Worker Configuration
     celery_worker_concurrency: int = 4
-    celery_worker_prefetch_multiplier: int = 1
+    celery_worker_prefetch_multiplier: int = 1  # Only prefetch 1 task per worker
     celery_worker_max_tasks_per_child: int = 1000
     celery_worker_max_memory_per_child: int = 200000  # 200MB in KB
     
