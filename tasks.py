@@ -319,53 +319,41 @@ def batch_process_jobs(self, job_requests: List[Dict[str, Any]]) -> Dict[str, An
         if not memory_manager.is_memory_available():
             raise Retry('Insufficient memory for batch processing', countdown=120, max_retries=2)
         
-        # Get recommended concurrency based on available memory
-        recommended_concurrency = memory_manager.get_recommended_concurrency()
-        batch_size = min(len(job_requests), recommended_concurrency, settings.batch_size)
+        print(f"🚀 [BATCH {batch_id}] Starting batch processing of {len(job_requests)} jobs")
         
-        print(f"Processing batch of {len(job_requests)} jobs with concurrency {batch_size}")
+        # Start all jobs asynchronously without waiting for results
+        for i, job_req in enumerate(job_requests):
+            print(f"📤 [BATCH {batch_id}] Starting job {i + 1}/{len(job_requests)}: {job_req['job_id']}")
+            
+            # Start individual job task
+            task_result = process_job_task.delay(
+                job_req['job_id'],
+                job_req['username'],
+                job_req['campaign'],
+                job_req.get('row_id')
+            )
+            
+            results.append({
+                "job_id": job_req['job_id'],
+                "task_id": task_result.id,
+                "status": "started",
+                "index": i + 1
+            })
         
-        # Create job groups for parallel processing
-        job_groups = []
-        for i in range(0, len(job_requests), batch_size):
-            batch_chunk = job_requests[i:i + batch_size]
-            group_tasks = []
-            
-            for job_req in batch_chunk:
-                task = process_job_task.s(
-                    job_req['job_id'],
-                    job_req['username'],
-                    job_req['campaign'],
-                    job_req.get('row_id')
-                )
-                group_tasks.append(task)
-            
-            job_groups.append(group(*group_tasks))
-        
-        # Process groups sequentially to manage memory
-        for i, job_group in enumerate(job_groups):
-            print(f"Processing batch group {i + 1}/{len(job_groups)}")
-            
-            # Check memory before each group
-            if not memory_manager.is_memory_available():
-                print("Insufficient memory, waiting before next group")
-                import time
-                time.sleep(60)
-            
-            # Execute group
-            group_result = job_group.apply_async()
-            results.extend(group_result.get())
+        print(f"✅ [BATCH {batch_id}] Started {len(results)} jobs successfully")
         
         return {
             "batch_id": batch_id,
             "total_jobs": len(job_requests),
-            "processed_jobs": len(results),
-            "results": results
+            "started_jobs": len(results),
+            "job_results": results,
+            "status": "started",
+            "message": f"Started {len(results)} jobs in batch"
         }
         
     except Exception as e:
         error_msg = f"Batch processing failed: {str(e)}"
-        print(f"Error in batch processing: {e}")
+        print(f"❌ [BATCH {batch_id}] Error in batch processing: {e}")
         return {
             "batch_id": batch_id,
             "status": "failed",
