@@ -6,7 +6,8 @@ WASABI_ENDPOINT=https://s3.us-central-1.wasabisys.com
 BUCKET_NAME=ncrfiles
 
 # Database Configuration
-DB_HOST=localhost
+# Use host.docker.internal to connect to host MySQL from Docker containers
+DB_HOST=host.docker.internal
 DB_USER=d-admin
 DB_PASS=C!0ud$24
 DB_NAME=ncr3d_crm

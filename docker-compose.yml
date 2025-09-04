@@ -34,6 +34,8 @@ services:
       - GUNICORN_BIND=0.0.0.0:8001
     env_file:
       - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy
@@ -62,6 +64,8 @@ services:
       - REDIS_PORT=6379  # Internal Redis port
     env_file:
       - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy
@@ -90,6 +94,8 @@ services:
       - REDIS_PORT=6379  # Internal Redis port
     env_file:
       - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy
@@ -114,6 +120,8 @@ services:
       - REDIS_PORT=6379  # Internal Redis port
     env_file:
       - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy
