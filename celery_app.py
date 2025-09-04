@@ -69,13 +69,13 @@ def create_celery_app() -> Celery:
         task_send_sent_event=False,
         worker_enable_remote_control=False,
         
-        # Beat Schedule (for periodic tasks)
-        beat_schedule={
-            'memory-monitor': {
-                'task': 'tasks.memory_monitor_task',
-                'schedule': settings.memory_check_interval,
-            },
-        },
+        # Beat Schedule (for periodic tasks) - Disabled for now
+        # beat_schedule={
+        #     'memory-monitor': {
+        #         'task': 'tasks.memory_monitor_task',
+        #         'schedule': settings.memory_check_interval,  # seconds
+        #     },
+        # },
     )
     
     return app
@@ -155,3 +155,7 @@ class MemoryManager:
 
 # Global memory manager instance
 memory_manager = MemoryManager()
+
+# Import tasks to ensure they are registered
+# This must be done after celery_app is created to avoid circular imports
+import tasks

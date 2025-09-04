@@ -327,7 +327,109 @@ CELERY_WORKER_MAX_MEMORY_PER_CHILD=200000
 
 ```bash
 # Run in debug mode
-CELERY_LOGLEVEL=debug docker-compose up worker
+CELERY_LOGLEVEL=debug docker compose up worker
+```
+
+## Logging & Monitoring
+
+### Viewing Logs
+
+#### Real-time Log Monitoring
+
+```bash
+# Monitor all services
+docker compose logs -f
+
+# Monitor specific services
+docker compose logs -f web      # FastAPI + Gunicorn
+docker compose logs -f worker   # Celery workers
+docker compose logs -f beat     # Celery beat scheduler
+docker compose logs -f flower   # Flower monitoring
+docker compose logs -f redis    # Redis server
+```
+
+#### Log Analysis
+
+```bash
+# View logs with timestamps
+docker compose logs -f -t
+
+# View last N lines
+docker compose logs --tail=100 web
+docker compose logs --tail=50 worker
+
+# Filter by log level
+docker compose logs -f web | grep "ERROR"
+docker compose logs -f worker | grep -E "(ERROR|CRITICAL|WARNING)"
+
+# Filter by time/date
+docker compose logs -f web | grep "2024-01-15"
+docker compose logs -f worker | grep "14:30"
+```
+
+#### Individual Container Logs
+
+```bash
+# Get container names
+docker compose ps
+
+# View specific container logs
+docker logs -f ncr_background_worker-web-1
+docker logs -f ncr_background_worker-worker-1
+docker logs -f ncr_redis
+
+# View with timestamps
+docker logs -f -t ncr_background_worker-web-1
+```
+
+### Log Levels
+
+#### Application Logs (FastAPI/Gunicorn)
+- **INFO**: General application flow
+- **WARNING**: Non-critical issues
+- **ERROR**: Application errors
+- **DEBUG**: Detailed debugging information
+
+#### Celery Worker Logs
+- **INFO**: Task processing status
+- **WARNING**: Memory warnings, retries
+- **ERROR**: Task failures, connection issues
+- **DEBUG**: Detailed task execution
+
+#### Redis Logs
+- **INFO**: Connection status, operations
+- **WARNING**: Memory usage warnings
+- **ERROR**: Connection failures
+
+### Log Rotation
+
+```bash
+# Configure log rotation (add to docker-compose.yml)
+services:
+  web:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+```
+
+### Monitoring Commands
+
+```bash
+# Check service status
+docker compose ps
+
+# Check resource usage
+docker stats
+
+# Check health endpoints
+curl http://localhost:8001/health
+curl http://localhost:8001/memory-stats
+curl http://localhost:8001/celery-stats
+
+# Monitor Flower dashboard
+open http://localhost:5555
 ```
 
 ## Maintenance

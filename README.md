@@ -400,15 +400,63 @@ All errors are logged and job status is updated accordingly.
 
 ### Logs
 
+#### Docker Compose Logs
+
 ```bash
-# View application logs
-docker-compose logs -f web
+# View application logs (FastAPI + Gunicorn)
+docker compose logs -f web
 
-# View worker logs
-docker-compose logs -f worker
+# View worker logs (Celery workers)
+docker compose logs -f worker
 
-# View all logs
-docker-compose logs -f
+# View beat scheduler logs
+docker compose logs -f beat
+
+# View flower monitoring logs
+docker compose logs -f flower
+
+# View Redis logs
+docker compose logs -f redis
+
+# View all service logs
+docker compose logs -f
+
+# View logs with timestamps
+docker compose logs -f -t
+
+# View last 100 lines of logs
+docker compose logs --tail=100 web
+```
+
+#### Individual Container Logs
+
+```bash
+# Get container names
+docker compose ps
+
+# View logs for specific container
+docker logs -f ncr_background_worker-web-1
+docker logs -f ncr_background_worker-worker-1
+docker logs -f ncr_redis
+
+# View logs with timestamps
+docker logs -f -t ncr_background_worker-web-1
+
+# View last 50 lines
+docker logs --tail=50 ncr_background_worker-worker-1
+```
+
+#### Log Filtering
+
+```bash
+# Filter logs by service and time
+docker compose logs -f web | grep "ERROR"
+docker compose logs -f worker | grep "WARNING"
+docker compose logs -f web | grep "2024-01-15"
+
+# Filter by log level
+docker compose logs -f worker | grep -E "(ERROR|CRITICAL)"
+docker compose logs -f web | grep -E "(INFO|DEBUG)"
 ```
 
 ### Debug Commands
