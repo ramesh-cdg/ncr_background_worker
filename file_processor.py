@@ -36,28 +36,65 @@ class FileProcessor:
         """Download file from Wasabi using presigned URL"""
         filename = os.path.basename(urlparse(url).path)
         local_path = f"/tmp/{filename}"
+        
+        print(f"☁️ [WASABI] Downloading from URL...")
+        print(f"   - Filename: {filename}")
+        print(f"   - Local path: {local_path}")
+        
         response = requests.get(url, stream=True)
+        print(f"   - Response status: {response.status_code}")
+        print(f"   - Response headers: {dict(response.headers)}")
+        
         if response.status_code != 200:
-            raise Exception(f"Failed to download file: HTTP {response.status_code}")
+            error_msg = f"Failed to download file: HTTP {response.status_code}"
+            print(f"❌ [WASABI] {error_msg}")
+            print(f"   - Response text: {response.text}")
+            raise Exception(error_msg)
+        
         with open(local_path, "wb") as f:
+            total_size = 0
             for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
+                if chunk:
+                    f.write(chunk)
+                    total_size += len(chunk)
+        
+        print(f"   ✅ Downloaded successfully: {total_size} bytes")
         return local_path
     
     @staticmethod
     def download_and_prepare(path: str, table_path: str, local_base_dir: str) -> str:
         """Download file from Wasabi and prepare it in local directory"""
+        print(f"☁️ [WASABI] Downloading file...")
+        print(f"   - Table path: {table_path}")
+        print(f"   - Target path: {path}")
+        print(f"   - Local base dir: {local_base_dir}")
+        
         url = FileProcessor.generate_presigned_url(table_path)
+        print(f"   - Generated presigned URL: {url[:100]}...")
         
         try:
             local_path = FileProcessor.download_from_wasabi(url)
+            print(f"   - Downloaded to temp: {local_path}")
+            
             rel_path = os.path.join(path.lstrip("/"))
             final_local_path = os.path.join(local_base_dir, rel_path)
+            print(f"   - Final local path: {final_local_path}")
+            
             os.makedirs(os.path.dirname(final_local_path), exist_ok=True)
+            print(f"   - Created directory: {os.path.dirname(final_local_path)}")
+            
             shutil.move(local_path, final_local_path)
+            print(f"   ✅ File moved to final location")
+            
+            # Check final file size
+            if os.path.exists(final_local_path):
+                file_size = os.path.getsize(final_local_path)
+                print(f"   - Final file size: {file_size} bytes")
+            
             return final_local_path
         except Exception as e:
-            print(f"Error downloading {table_path}: {e}")
+            print(f"❌ [WASABI] Error downloading {table_path}: {e}")
+            print(f"   - Exception type: {type(e).__name__}")
             return None
     
     @staticmethod

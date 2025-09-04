@@ -40,10 +40,28 @@ def process_job_task(
         
         # Get file paths from database
         redis_manager.update_job_status(task_id, JobStatus.PROCESSING, "Fetching file paths from database")
+        print(f"🔍 [TASK {task_id}] Fetching file paths for job_id: {job_id}")
+        
         file_paths, sku_id = DatabaseManager.get_file_paths_from_db(job_id)
         
+        print(f"📊 [TASK {task_id}] Database query results:")
+        print(f"   - Job ID: {job_id}")
+        print(f"   - SKU ID: {sku_id}")
+        print(f"   - File paths count: {len(file_paths) if file_paths else 0}")
+        
+        if file_paths:
+            print(f"   - File paths (first 10):")
+            for i, path in enumerate(file_paths[:10]):
+                print(f"     {i+1}. {path}")
+            if len(file_paths) > 10:
+                print(f"     ... and {len(file_paths) - 10} more files")
+        else:
+            print("   - No file paths returned from database")
+        
         if not file_paths:
-            redis_manager.update_job_status(task_id, JobStatus.FAILED, "No files found for this job")
+            error_msg = f"No files found for job_id: {job_id}, sku_id: {sku_id}"
+            print(f"❌ [TASK {task_id}] {error_msg}")
+            redis_manager.update_job_status(task_id, JobStatus.FAILED, error_msg)
             return {"status": "failed", "message": "No files found"}
         
         total_files = len(file_paths)
@@ -55,30 +73,67 @@ def process_job_task(
         )
         
         # Get SFTP connection
+        print(f"🔗 [TASK {task_id}] Getting SFTP connection...")
         sftp, transport = SFTPManager.get_connection()
+        print(f"✅ [TASK {task_id}] SFTP connection established")
         
         try:
             # Setup directories
             remote_base_dir = f"{job_id}/"
+            print(f"📁 [TASK {task_id}] Setting up directories:")
+            print(f"   - Remote base dir: {remote_base_dir}")
+            
             SFTPManager.check_and_delete_folder(sftp, remote_base_dir)
             
             download_dir = f"/tmp/validator_files/{job_id}"
             zip_download_dir = f"/tmp/validator_zipfiles/"
+            print(f"   - Download dir: {download_dir}")
+            print(f"   - Zip dir: {zip_download_dir}")
+            
             os.makedirs(download_dir, exist_ok=True)
             os.makedirs(zip_download_dir, exist_ok=True)
+            print(f"✅ [TASK {task_id}] Directories created successfully")
             
             # Clean structure and prepare files
             redis_manager.update_job_status(task_id, JobStatus.PROCESSING, "Organizing file structure")
+            print(f"🔧 [TASK {task_id}] Organizing file structure for {len(file_paths)} files...")
             outputs, materials = FileProcessor.clean_structure(file_paths, sku_id)
+            
+            print(f"📋 [TASK {task_id}] File structure organization results:")
+            print(f"   - Output files count: {len(outputs)}")
+            print(f"   - Material groups count: {len(materials)}")
+            
+            if outputs:
+                print(f"   - Output files (first 5):")
+                for i, (key, val) in enumerate(list(outputs.items())[:5]):
+                    print(f"     {i+1}. {key} -> {val}")
+                if len(outputs) > 5:
+                    print(f"     ... and {len(outputs) - 5} more output files")
+            
+            if materials:
+                print(f"   - Material groups:")
+                for mat_id, textures in materials.items():
+                    print(f"     Material {mat_id}: {len(textures)} textures")
+                    for tex_type, path in list(textures.items())[:3]:  # Show first 3
+                        print(f"       - {tex_type} -> {path}")
+                    if len(textures) > 3:
+                        print(f"       ... and {len(textures) - 3} more textures")
             
             all_local_files = []
             processed_count = 0
             
             # Download and prepare output files
+            print(f"⬇️ [TASK {task_id}] Starting download of {len(outputs)} output files...")
             for key, val in outputs.items():
                 # Light memory check - only fail if memory is critically high
-                if memory_manager.get_memory_usage()['system_memory_percent'] > 95:
-                    raise Exception("Critical memory usage during file processing")
+                memory_usage = memory_manager.get_memory_usage()
+                if memory_usage['system_memory_percent'] > 95:
+                    raise Exception(f"Critical memory usage: {memory_usage['system_memory_percent']:.1f}%")
+                
+                print(f"📥 [TASK {task_id}] Downloading output file {processed_count + 1}/{len(outputs)}:")
+                print(f"   - Source: {key}")
+                print(f"   - Target: {val}")
+                print(f"   - Memory usage: {memory_usage['system_memory_percent']:.1f}%")
                 
                 redis_manager.update_job_status(
                     task_id, 
@@ -94,14 +149,28 @@ def process_job_task(
                 result = FileProcessor.download_and_prepare(val, key, download_dir)
                 if result:
                     all_local_files.append(result)
+                    print(f"   ✅ Downloaded successfully to: {result}")
+                else:
+                    print(f"   ❌ Failed to download: {key}")
                 processed_count += 1
             
             # Download and prepare material files
+            print(f"🎨 [TASK {task_id}] Starting download of material files...")
+            total_materials = sum(len(textures) for textures in materials.values())
+            material_count = 0
+            
             for mat_id, textures in materials.items():
+                print(f"   📦 Processing material group: {mat_id} ({len(textures)} textures)")
                 for tex_type, path in textures.items():
                     # Check memory during processing
                     if not memory_manager.is_memory_available():
-                        raise Exception("Insufficient memory during material processing")
+                        memory_usage = memory_manager.get_memory_usage()
+                        raise Exception(f"Insufficient memory during material processing: {memory_usage['system_memory_percent']:.1f}%")
+                    
+                    print(f"   📥 [TASK {task_id}] Downloading material {material_count + 1}/{total_materials}:")
+                    print(f"      - Material ID: {mat_id}")
+                    print(f"      - Texture type: {tex_type}")
+                    print(f"      - Target path: {path}")
                     
                     redis_manager.update_job_status(
                         task_id, 
@@ -117,22 +186,57 @@ def process_job_task(
                     result = FileProcessor.download_and_prepare(path, tex_type, download_dir)
                     if result:
                         all_local_files.append(result)
+                        print(f"      ✅ Downloaded successfully to: {result}")
+                    else:
+                        print(f"      ❌ Failed to download: {tex_type}")
                     processed_count += 1
+                    material_count += 1
             
             # Create zip file
+            print(f"📦 [TASK {task_id}] Creating validation package...")
+            print(f"   - Total local files: {len(all_local_files)}")
+            print(f"   - Download directory: {download_dir}")
+            
             redis_manager.update_job_status(task_id, JobStatus.PROCESSING, "Creating validation package")
             zip_path = os.path.join(zip_download_dir, f"{job_id}.zip")
+            print(f"   - Zip file path: {zip_path}")
+            
             FileProcessor.zip_files(zip_path, download_dir)
             
+            # Check if zip file was created successfully
+            if os.path.exists(zip_path):
+                zip_size = os.path.getsize(zip_path)
+                print(f"   ✅ Zip file created successfully: {zip_size} bytes")
+            else:
+                print(f"   ❌ Zip file creation failed: {zip_path}")
+                raise Exception("Failed to create zip file")
+            
             # Send to validator and update database
+            print(f"🔍 [TASK {task_id}] Sending to validator...")
+            print(f"   - Zip file: {zip_path}")
+            print(f"   - SKU ID: {sku_id}")
+            print(f"   - Job ID: {job_id}")
+            print(f"   - Username: {username}")
+            print(f"   - Campaign: {campaign}")
+            print(f"   - Row ID: {row_id}")
+            
             redis_manager.update_job_status(task_id, JobStatus.PROCESSING, "Sending to validator")
-            if ValidationService.send_to_validator(zip_path, sku_id, job_id, username, campaign, row_id):
+            validation_result = ValidationService.send_to_validator(zip_path, sku_id, job_id, username, campaign, row_id)
+            
+            print(f"📋 [TASK {task_id}] Validation result: {validation_result}")
+            
+            if validation_result:
                 redis_manager.update_job_status(task_id, JobStatus.VALIDATION_PASSED, "Validation passed, uploading files")
                 
                 # Upload files
+                print(f"⬆️ [TASK {task_id}] Starting upload of {len(all_local_files)} files to SFTP...")
                 for i, local_path in enumerate(all_local_files):
                     relative_path = os.path.relpath(local_path, download_dir)
                     remote_path = os.path.join(remote_base_dir, relative_path)
+                    
+                    print(f"   📤 [TASK {task_id}] Uploading file {i + 1}/{len(all_local_files)}:")
+                    print(f"      - Local: {local_path}")
+                    print(f"      - Remote: {remote_path}")
                     
                     redis_manager.update_job_status(
                         task_id, 
@@ -146,34 +250,57 @@ def process_job_task(
                         }
                     )
                     
-                    SFTPManager.upload_to_sftp(sftp, local_path, remote_path)
+                    try:
+                        SFTPManager.upload_to_sftp(sftp, local_path, remote_path)
+                        print(f"      ✅ Uploaded successfully")
+                    except Exception as e:
+                        print(f"      ❌ Upload failed: {e}")
+                        raise e
                 
                 # Cleanup
+                print(f"🧹 [TASK {task_id}] Cleaning up temporary files...")
                 FileProcessor.cleanup_files(all_local_files, zip_path, download_dir)
+                print(f"   ✅ Cleanup completed")
                 
                 redis_manager.update_job_status(task_id, JobStatus.COMPLETED, "Job completed successfully")
+                print(f"🎉 [TASK {task_id}] Job completed successfully!")
                 return {"status": "completed", "message": "Job completed successfully"}
                 
             else:
+                print(f"❌ [TASK {task_id}] Validation failed!")
                 redis_manager.update_job_status(task_id, JobStatus.VALIDATION_FAILED, "Validation failed, no files uploaded")
                 
                 # Cleanup on validation failure
+                print(f"🧹 [TASK {task_id}] Cleaning up files after validation failure...")
                 FileProcessor.cleanup_files(all_local_files, zip_path, download_dir)
+                print(f"   ✅ Cleanup completed")
                 return {"status": "validation_failed", "message": "Validation failed"}
         
         finally:
             # Close SFTP connection
+            print(f"🔌 [TASK {task_id}] Closing SFTP connection...")
             sftp.close()
             transport.close()
+            print(f"   ✅ SFTP connection closed")
     
     except Retry:
+        print(f"🔄 [TASK {task_id}] Task retry requested")
         raise
     except Exception as e:
         error_msg = f"Job processing failed: {str(e)}"
+        print(f"💥 [TASK {task_id}] ERROR: {error_msg}")
+        print(f"   - Job ID: {job_id}")
+        print(f"   - SKU ID: {sku_id}")
+        print(f"   - Username: {username}")
+        print(f"   - Campaign: {campaign}")
+        print(f"   - Row ID: {row_id}")
+        print(f"   - Exception type: {type(e).__name__}")
+        print(f"   - Exception details: {str(e)}")
+        
         redis_manager.update_job_status(task_id, JobStatus.FAILED, error_msg)
-        print(f"Error processing job {job_id}: {e}")
         
         # Schedule cleanup for failed job after 1 hour
+        print(f"⏰ [TASK {task_id}] Scheduling cleanup for failed job in 1 hour")
         cleanup_failed_job.apply_async(args=[task_id], countdown=3600)
         
         return {"status": "failed", "message": error_msg}

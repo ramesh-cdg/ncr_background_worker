@@ -22,11 +22,14 @@ class DatabaseManager:
     @staticmethod
     def get_file_paths_from_db(job_id: str) -> Tuple[List[str], str]:
         """Get file paths and SKU ID from database for a job"""
+        print(f"🗄️ [DB] Getting file paths for job_id: {job_id}")
+        
         conn = DatabaseManager.get_connection()
         cursor = conn.cursor()
         
         try:
             # Get file paths
+            print(f"🗄️ [DB] Executing file paths query...")
             cursor.execute(
                 """
                 SELECT file_path
@@ -49,8 +52,10 @@ class DatabaseManager:
             )
             
             paths = [row[0] for row in cursor.fetchall()]
+            print(f"🗄️ [DB] File paths query returned {len(paths)} results")
             
             # Get SKU ID
+            print(f"🗄️ [DB] Executing SKU ID query...")
             cursor.execute(
                 """
                 SELECT sku_id FROM job_details WHERE job_id = %s AND status = 'Active' LIMIT 1
@@ -59,9 +64,13 @@ class DatabaseManager:
             )
             result = cursor.fetchone()
             sku_id = result[0] if result else None
+            print(f"🗄️ [DB] SKU ID query returned: {sku_id}")
             
             return paths, sku_id
             
+        except Exception as e:
+            print(f"🗄️ [DB] ERROR in get_file_paths_from_db: {e}")
+            raise e
         finally:
             cursor.close()
             conn.close()
