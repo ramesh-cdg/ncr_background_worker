@@ -1,0 +1,39 @@
+# Wasabi S3 Configuration
+WASABI_ACCESS_KEY=JJRP6J4ARVDUM3HBFI0T
+WASABI_SECRET_KEY=7wjNIWE2p52MzHqLhGL51t7yUOArhJAAEK7LwJVK
+WASABI_REGION=us-central-1
+WASABI_ENDPOINT=https://s3.us-central-1.wasabisys.com
+BUCKET_NAME=ncrfiles
+
+# Database Configuration
+DB_HOST=localhost
+DB_USER=d-admin
+DB_PASS=C!0ud$24
+DB_NAME=ncr3d_crm
+
+# Redis Configuration
+REDIS_HOST=localhost
+REDIS_PORT=6380
+REDIS_DB=0
+
+# SFTP Configuration
+SFTP_HOST=modeling.arcstudio.ai
+SFTP_PORT=22
+SFTP_USERNAME=modeling
+SFTP_PASSWORD=eruCnoWz3GzvC5rE6K42Sv99
+
+# API Configuration
+API_TITLE=NCR Upload API
+API_VERSION=1.0.0
+API_HOST=0.0.0.0
+API_PORT=8001
+
+# Validator API Configuration
+VALIDATOR_API_URL=https://bond-api.nextechar.com/api/validator/validate
+VALIDATOR_API_KEY=13D8429DBDF8C3DD437FB35182A98_BOND
+
+# Timezone Configuration
+TIMEZONE=America/New_York
+
+# Job Configuration
+JOB_EXPIRE_HOURS=24

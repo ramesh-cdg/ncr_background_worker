@@ -1,0 +1,132 @@
+# Docker Compose file for NCR Upload API
+# Compatible with Docker Compose V2 (docker compose) and V1 (docker-compose)
+
+services:
+  # Redis for Celery broker and result backend
+  redis:
+    image: redis:7-alpine
+    container_name: ncr_redis
+    ports:
+      - "6380:6379"  # External port 6380, internal port 6379
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # FastAPI Application
+  web:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: ncr_web
+    ports:
+      - "8001:8001"  # Changed to port 8001
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379  # Internal Redis port
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # Celery Worker
+  worker:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: ncr_worker
+    command: python start_worker.py worker --concurrency 4
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379  # Internal Redis port
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "celery", "-A", "celery_app", "inspect", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Celery Beat Scheduler
+  beat:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: ncr_beat
+    command: python start_worker.py beat
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379  # Internal Redis port
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  # Flower Monitoring
+  flower:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: ncr_flower
+    command: python start_worker.py flower
+    ports:
+      - "5555:5555"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379  # Internal Redis port
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+volumes:
+  redis_data:
