@@ -140,9 +140,12 @@ async def get_job_status_endpoint(task_id: str):
                 timestamp=datetime.fromisoformat(job_data["timestamp"])
             )
         else:
-            raise HTTPException(status_code=404, detail="Job not found")
+            raise HTTPException(status_code=404, detail=f"Job not found with task_id: {task_id}")
             
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"❌ [API] Error getting job status for task_id {task_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -360,6 +363,11 @@ async def get_batch_status(batch_id: str):
         from celery.result import AsyncResult
         result = AsyncResult(batch_id, app=celery_app)
         
+        # Check if batch exists in Redis
+        batch_info = redis_manager.client.hgetall(f"batch:{batch_id}")
+        if not batch_info:
+            raise HTTPException(status_code=404, detail=f"Batch not found with batch_id: {batch_id}")
+        
         if result.ready():
             if result.successful():
                 batch_result = result.result
@@ -419,7 +427,10 @@ async def get_batch_status(batch_id: str):
                 "timestamp": redis_manager.get_current_ny_time()
             }
             
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"❌ [API] Error getting batch status for {batch_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

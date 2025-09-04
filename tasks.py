@@ -36,10 +36,10 @@ def process_job_task(
         # The worker will only pick up tasks when it has capacity
         
         # Update status to processing
-        redis_manager.update_job_status(task_id, JobStatus.PROCESSING, "Starting job processing")
+        redis_manager.update_job_status(task_id, JobStatus.PROCESSING, "Initializing job processing")
         
         # Get file paths from database
-        redis_manager.update_job_status(task_id, JobStatus.PROCESSING, "Fetching file paths from database")
+        redis_manager.update_job_status(task_id, JobStatus.PROCESSING, "Querying database for file paths")
         print(f"🔍 [TASK {task_id}] Fetching file paths for job_id: {job_id}")
         
         file_paths, sku_id = DatabaseManager.get_file_paths_from_db(job_id)
@@ -73,6 +73,7 @@ def process_job_task(
         )
         
         # Get SFTP connection
+        redis_manager.update_job_status(task_id, JobStatus.PROCESSING, "Establishing SFTP connection")
         print(f"🔗 [TASK {task_id}] Getting SFTP connection...")
         sftp, transport = SFTPManager.get_connection()
         print(f"✅ [TASK {task_id}] SFTP connection established")
@@ -95,7 +96,7 @@ def process_job_task(
             print(f"✅ [TASK {task_id}] Directories created successfully")
             
             # Clean structure and prepare files
-            redis_manager.update_job_status(task_id, JobStatus.PROCESSING, "Organizing file structure")
+            redis_manager.update_job_status(task_id, JobStatus.PROCESSING, "Organizing file structure and grouping materials")
             print(f"🔧 [TASK {task_id}] Organizing file structure for {len(file_paths)} files...")
             outputs, materials = FileProcessor.clean_structure(file_paths, sku_id)
             
@@ -123,6 +124,7 @@ def process_job_task(
             processed_count = 0
             
             # Download and prepare output files
+            redis_manager.update_job_status(task_id, JobStatus.PROCESSING, f"Downloading {len(outputs)} output files from Wasabi")
             print(f"⬇️ [TASK {task_id}] Starting download of {len(outputs)} output files...")
             for key, val in outputs.items():
                 # Light memory check - only fail if memory is critically high
@@ -155,6 +157,7 @@ def process_job_task(
                 processed_count += 1
             
             # Download and prepare material files
+            redis_manager.update_job_status(task_id, JobStatus.PROCESSING, f"Downloading material files from Wasabi")
             print(f"🎨 [TASK {task_id}] Starting download of material files...")
             total_materials = sum(len(textures) for textures in materials.values())
             material_count = 0
@@ -197,7 +200,7 @@ def process_job_task(
             print(f"   - Total local files: {len(all_local_files)}")
             print(f"   - Download directory: {download_dir}")
             
-            redis_manager.update_job_status(task_id, JobStatus.PROCESSING, "Creating validation package")
+            redis_manager.update_job_status(task_id, JobStatus.PROCESSING, "Creating zip package for validation")
             zip_path = os.path.join(zip_download_dir, f"{job_id}.zip")
             print(f"   - Zip file path: {zip_path}")
             
@@ -220,15 +223,16 @@ def process_job_task(
             print(f"   - Campaign: {campaign}")
             print(f"   - Row ID: {row_id}")
             
-            redis_manager.update_job_status(task_id, JobStatus.PROCESSING, "Sending to validator")
+            redis_manager.update_job_status(task_id, JobStatus.PROCESSING, "Sending files to validation service")
             validation_result = ValidationService.send_to_validator(zip_path, sku_id, job_id, username, campaign, row_id)
             
             print(f"📋 [TASK {task_id}] Validation result: {validation_result}")
             
             if validation_result:
-                redis_manager.update_job_status(task_id, JobStatus.VALIDATION_PASSED, "Validation passed, uploading files")
+                redis_manager.update_job_status(task_id, JobStatus.VALIDATION_PASSED, "Validation passed, preparing to upload files")
                 
                 # Upload files
+                redis_manager.update_job_status(task_id, JobStatus.UPLOADING, f"Uploading {len(all_local_files)} files to SFTP server")
                 print(f"⬆️ [TASK {task_id}] Starting upload of {len(all_local_files)} files to SFTP...")
                 for i, local_path in enumerate(all_local_files):
                     relative_path = os.path.relpath(local_path, download_dir)
@@ -258,19 +262,21 @@ def process_job_task(
                         raise e
                 
                 # Cleanup
+                redis_manager.update_job_status(task_id, JobStatus.PROCESSING, "Cleaning up temporary files")
                 print(f"🧹 [TASK {task_id}] Cleaning up temporary files...")
                 FileProcessor.cleanup_files(all_local_files, zip_path, download_dir)
                 print(f"   ✅ Cleanup completed")
                 
-                redis_manager.update_job_status(task_id, JobStatus.COMPLETED, "Job completed successfully")
+                redis_manager.update_job_status(task_id, JobStatus.COMPLETED, "Job completed successfully - all files uploaded")
                 print(f"🎉 [TASK {task_id}] Job completed successfully!")
                 return {"status": "completed", "message": "Job completed successfully"}
                 
             else:
                 print(f"❌ [TASK {task_id}] Validation failed!")
-                redis_manager.update_job_status(task_id, JobStatus.VALIDATION_FAILED, "Validation failed, no files uploaded")
+                redis_manager.update_job_status(task_id, JobStatus.VALIDATION_FAILED, "Validation failed - files rejected by validation service")
                 
                 # Cleanup on validation failure
+                redis_manager.update_job_status(task_id, JobStatus.PROCESSING, "Cleaning up files after validation failure")
                 print(f"🧹 [TASK {task_id}] Cleaning up files after validation failure...")
                 FileProcessor.cleanup_files(all_local_files, zip_path, download_dir)
                 print(f"   ✅ Cleanup completed")
