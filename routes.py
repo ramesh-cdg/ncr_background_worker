@@ -2,7 +2,6 @@
 API routes module
 """
 import os
-import uuid
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from typing import Optional, List, Dict, Any
@@ -45,16 +44,16 @@ async def process_job(job_request: JobRequest):
         # Always queue the job - Celery will handle memory management
         # No need to check memory here as Celery has built-in concurrency control
         
-        # Generate unique task ID
-        task_id = str(uuid.uuid4())
-        
-        # Start Celery task
+        # Start Celery task first to get the actual task ID
         celery_result = process_job_task.delay(
             job_request.job_id,
             job_request.username,
             job_request.campaign,
             job_request.row_id
         )
+        
+        # Use the Celery task ID as the primary task ID
+        task_id = celery_result.id
         
         # Create job status in Redis with Celery task ID
         redis_manager.create_job_status(
