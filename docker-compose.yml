@@ -24,21 +24,15 @@ services:
     build: 
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "8001:8001"
+    network_mode: "host"
     environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379  # Internal Redis port
+      - REDIS_HOST=localhost
+      - REDIS_PORT=6380  # External Redis port
       - GUNICORN_WORKERS=4
       - GUNICORN_WORKER_CLASS=uvicorn.workers.UvicornWorker
       - GUNICORN_BIND=0.0.0.0:8001
     env_file:
       - .env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      redis:
-        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
@@ -59,16 +53,12 @@ services:
       context: .
       dockerfile: Dockerfile
     command: python start_worker.py worker --concurrency 4
+    network_mode: "host"
     environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379  # Internal Redis port
+      - REDIS_HOST=localhost
+      - REDIS_PORT=6380  # External Redis port
     env_file:
       - .env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      redis:
-        condition: service_healthy
     restart: unless-stopped
     deploy:
       resources:
@@ -89,16 +79,12 @@ services:
       context: .
       dockerfile: Dockerfile
     command: python start_worker.py beat
+    network_mode: "host"
     environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379  # Internal Redis port
+      - REDIS_HOST=localhost
+      - REDIS_PORT=6380  # External Redis port
     env_file:
       - .env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      redis:
-        condition: service_healthy
     restart: unless-stopped
     deploy:
       resources:
@@ -113,18 +99,12 @@ services:
       context: .
       dockerfile: Dockerfile
     command: python start_worker.py flower
-    ports:
-      - "5555:5555"
+    network_mode: "host"
     environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379  # Internal Redis port
+      - REDIS_HOST=localhost
+      - REDIS_PORT=6380  # External Redis port
     env_file:
       - .env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      redis:
-        condition: service_healthy
     restart: unless-stopped
     deploy:
       resources:

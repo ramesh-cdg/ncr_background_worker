@@ -6,15 +6,16 @@ WASABI_ENDPOINT=https://s3.us-central-1.wasabisys.com
 BUCKET_NAME=ncrfiles
 
 # Database Configuration
-# Use host.docker.internal to connect to host MySQL from Docker containers
-DB_HOST=host.docker.internal
+# Using host network mode - can connect to localhost MySQL
+DB_HOST=localhost
 DB_USER=d-admin
 DB_PASS=C!0ud$24
 DB_NAME=ncr3d_crm
 
 # Redis Configuration
-REDIS_HOST=redis
-REDIS_PORT=6379
+# Using host network mode - Docker Redis accessible on external port
+REDIS_HOST=localhost
+REDIS_PORT=6380
 REDIS_DB=0
 
 # SFTP Configuration
