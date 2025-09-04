@@ -39,7 +39,11 @@ class RedisManager:
         row_id: Optional[int] = None,
         celery_task_id: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Create initial job status in Redis"""
+        """Create initial job status in Redis - replaces any existing tasks for this job_id"""
+        
+        # Clean up any existing tasks for this job_id (keep only latest)
+        self.cleanup_old_tasks_for_job_id(job_id)
+        
         job_data = {
             "job_id": job_id,
             "task_id": task_id,
@@ -64,6 +68,38 @@ class RedisManager:
         self.client.expire(f"job:{task_id}", settings.job_expire_hours * 3600)  # Expire in hours
         
         return job_data
+    
+    def cleanup_old_tasks_for_job_id(self, job_id: str) -> None:
+        """Clean up old tasks for a specific job_id, keeping only the latest one"""
+        try:
+            print(f"🧹 [REDIS] Cleaning up old tasks for job_id: {job_id}")
+            
+            # Find all tasks for this job_id
+            tasks_to_cleanup = []
+            for key in self.client.scan_iter("job:*"):
+                task_id = key.split(":")[1]
+                job_data = self.get_job_status(task_id)
+                if job_data and job_data.get("job_id") == job_id:
+                    tasks_to_cleanup.append((task_id, job_data.get("timestamp", "")))
+            
+            if len(tasks_to_cleanup) > 0:
+                print(f"   Found {len(tasks_to_cleanup)} existing tasks for job_id {job_id}")
+                
+                # Sort by timestamp and keep only the latest
+                tasks_to_cleanup.sort(key=lambda x: x[1], reverse=True)
+                latest_task_id = tasks_to_cleanup[0][0]
+                
+                # Delete all except the latest
+                for task_id, timestamp in tasks_to_cleanup[1:]:
+                    self.client.delete(f"job:{task_id}")
+                    print(f"   ✅ Cleaned up old task: {task_id}")
+                
+                print(f"   ✅ Kept latest task: {latest_task_id}")
+            else:
+                print(f"   No existing tasks found for job_id {job_id}")
+                
+        except Exception as e:
+            print(f"❌ [REDIS] Error cleaning up old tasks for job_id {job_id}: {e}")
     
     def update_job_status(
         self, 

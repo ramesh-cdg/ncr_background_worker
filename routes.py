@@ -78,43 +78,38 @@ async def process_job(job_request: JobRequest):
 
 @router.get("/job-status-by-job-id/{job_id}")
 async def get_job_status_by_job_id(job_id: str):
-    """Get the status of a job by job ID (returns latest task)"""
+    """Get the status of a job by job ID (only returns if job is in progress)"""
     try:
         print(f"🔍 [API] Looking up job by job_id: {job_id}")
         
-        # Find all tasks for this job_id
+        # Find the single task for this job_id (no history kept)
         matching_jobs = redis_manager.get_jobs_by_job_id(job_id)
         
         if not matching_jobs:
-            raise HTTPException(status_code=404, detail=f"No jobs found with job_id: {job_id}")
+            raise HTTPException(status_code=404, detail=f"No job found with job_id: {job_id}")
         
-        # Sort by timestamp to get the latest one
-        latest_job = max(matching_jobs, key=lambda x: x.get("timestamp", ""))
+        # Since we only keep the latest task, there should be only one
+        job = matching_jobs[0]
         
-        print(f"✅ [API] Found {len(matching_jobs)} jobs for job_id {job_id}, returning latest")
+        # Only return if job is in progress
+        in_progress_statuses = ["pending", "processing", "uploading", "validation_passed"]
+        if job.get("status") not in in_progress_statuses:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} is not in progress (status: {job.get('status')})")
+        
+        print(f"✅ [API] Found in-progress job for job_id {job_id}")
         
         return {
             "job_id": job_id,
-            "task_id": latest_job["task_id"],
-            "celery_task_id": latest_job.get("celery_task_id", ""),
-            "status": latest_job["status"],
-            "progress": latest_job.get("progress", {}),
-            "message": latest_job.get("message", ""),
-            "username": latest_job.get("username", ""),
-            "campaign": latest_job.get("campaign", ""),
-            "row_id": latest_job.get("row_id", ""),
-            "timestamp": latest_job.get("timestamp", ""),
-            "logs": latest_job.get("logs", []),
-            "total_tasks_for_job": len(matching_jobs),
-            "all_tasks": [
-                {
-                    "task_id": job["task_id"],
-                    "status": job["status"],
-                    "timestamp": job.get("timestamp", ""),
-                    "message": job.get("message", "")
-                }
-                for job in matching_jobs
-            ]
+            "task_id": job["task_id"],
+            "celery_task_id": job.get("celery_task_id", ""),
+            "status": job["status"],
+            "progress": job.get("progress", {}),
+            "message": job.get("message", ""),
+            "username": job.get("username", ""),
+            "campaign": job.get("campaign", ""),
+            "row_id": job.get("row_id", ""),
+            "timestamp": job.get("timestamp", ""),
+            "logs": job.get("logs", [])
         }
             
     except HTTPException:
@@ -126,10 +121,15 @@ async def get_job_status_by_job_id(job_id: str):
 
 @router.get("/job-status/{task_id}", response_model=JobStatusResponse)
 async def get_job_status_endpoint(task_id: str):
-    """Get the status of a specific job by task ID"""
+    """Get the status of a specific job by task ID (only returns if job is in progress)"""
     try:
         job_data = redis_manager.get_job_status(task_id)
         if job_data:
+            # Only return if job is in progress
+            in_progress_statuses = ["pending", "processing", "uploading", "validation_passed"]
+            if job_data.get("status") not in in_progress_statuses:
+                raise HTTPException(status_code=404, detail=f"Job {task_id} is not in progress (status: {job_data.get('status')})")
+            
             return JobStatusResponse(
                 job_id=job_data["job_id"],
                 task_id=task_id,
@@ -139,33 +139,8 @@ async def get_job_status_endpoint(task_id: str):
                 timestamp=datetime.fromisoformat(job_data["timestamp"])
             )
         else:
-            # Job not found in Redis - check if it was completed and removed
-            from celery.result import AsyncResult
-            result = AsyncResult(task_id, app=celery_app)
-            
-            if result.ready() and result.successful():
-                # Job completed successfully and was removed from Redis
-                return JobStatusResponse(
-                    job_id="unknown",  # We don't have this info anymore
-                    task_id=task_id,
-                    status="completed",
-                    progress={"percentage": 100},
-                    message="Job completed successfully and removed from Redis",
-                    timestamp=datetime.now()
-                )
-            elif result.ready() and not result.successful():
-                # Job failed
-                return JobStatusResponse(
-                    job_id="unknown",
-                    task_id=task_id,
-                    status="failed",
-                    progress={"percentage": 0},
-                    message=f"Job failed: {str(result.result)}",
-                    timestamp=datetime.now()
-                )
-            else:
-                # Job still processing but not in Redis (shouldn't happen)
-                raise HTTPException(status_code=404, detail=f"Job not found with task_id: {task_id}")
+            # Job not found in Redis - it's either completed or failed
+            raise HTTPException(status_code=404, detail=f"Job not found with task_id: {task_id} (may be completed or failed)")
             
     except HTTPException:
         raise
@@ -176,34 +151,36 @@ async def get_job_status_endpoint(task_id: str):
 
 @router.get("/job-history/{job_id}")
 async def get_job_history(job_id: str):
-    """Get complete history of all tasks for a specific job_id"""
+    """Get current task status for a specific job_id (only returns if job is in progress)"""
     try:
-        print(f"🔍 [API] Getting job history for job_id: {job_id}")
+        print(f"🔍 [API] Getting current job status for job_id: {job_id}")
         
-        # Find all tasks for this job_id
+        # Find the single task for this job_id (no history kept)
         all_jobs = redis_manager.get_jobs_by_job_id(job_id)
         
         if not all_jobs:
-            raise HTTPException(status_code=404, detail=f"No jobs found with job_id: {job_id}")
+            raise HTTPException(status_code=404, detail=f"No job found with job_id: {job_id}")
         
-        # Sort by timestamp (oldest first)
-        sorted_jobs = sorted(all_jobs, key=lambda x: x.get("timestamp", ""))
+        # Since we only keep the latest task, there should be only one
+        job = all_jobs[0]
         
-        # Get the latest job for current status
-        latest_job = sorted_jobs[-1] if sorted_jobs else None
+        # Only return if job is in progress
+        in_progress_statuses = ["pending", "processing", "uploading", "validation_passed"]
+        if job.get("status") not in in_progress_statuses:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} is not in progress (status: {job.get('status')})")
         
-        print(f"✅ [API] Found {len(all_jobs)} tasks for job_id {job_id}")
+        print(f"✅ [API] Found in-progress job for job_id {job_id}")
         
         return {
             "job_id": job_id,
-            "total_tasks": len(all_jobs),
-            "current_status": latest_job["status"] if latest_job else "unknown",
-            "latest_task_id": latest_job["task_id"] if latest_job else None,
-            "latest_message": latest_job.get("message", "") if latest_job else "",
-            "latest_timestamp": latest_job.get("timestamp", "") if latest_job else "",
-            "username": latest_job.get("username", "") if latest_job else "",
-            "campaign": latest_job.get("campaign", "") if latest_job else "",
-            "row_id": latest_job.get("row_id", "") if latest_job else "",
+            "total_tasks": 1,
+            "current_status": job["status"],
+            "latest_task_id": job["task_id"],
+            "latest_message": job.get("message", ""),
+            "latest_timestamp": job.get("timestamp", ""),
+            "username": job.get("username", ""),
+            "campaign": job.get("campaign", ""),
+            "row_id": job.get("row_id", ""),
             "task_history": [
                 {
                     "task_id": job["task_id"],
@@ -214,23 +191,20 @@ async def get_job_history(job_id: str):
                     "progress": job.get("progress", {}),
                     "logs": job.get("logs", [])
                 }
-                for job in sorted_jobs
             ],
             "status_summary": {
-                "pending": len([j for j in all_jobs if j["status"] == "pending"]),
-                "processing": len([j for j in all_jobs if j["status"] == "processing"]),
-                "completed": len([j for j in all_jobs if j["status"] == "completed"]),
-                "failed": len([j for j in all_jobs if j["status"] == "failed"]),
-                "validation_passed": len([j for j in all_jobs if j["status"] == "validation_passed"]),
-                "validation_failed": len([j for j in all_jobs if j["status"] == "validation_failed"]),
-                "uploading": len([j for j in all_jobs if j["status"] == "uploading"])
-            }
+                "pending": 1 if job["status"] == "pending" else 0,
+                "processing": 1 if job["status"] == "processing" else 0,
+                "uploading": 1 if job["status"] == "uploading" else 0,
+                "validation_passed": 1 if job["status"] == "validation_passed" else 0
+            },
+            "note": "Only in-progress tasks are returned - completed/failed tasks return 404"
         }
             
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ [API] Error getting job history for {job_id}: {e}")
+        print(f"❌ [API] Error getting job status for {job_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -288,8 +262,24 @@ async def get_jobs(
     status: Optional[str] = None,
     limit: Optional[int] = 100
 ):
-    """Get jobs from Redis with filtering options"""
+    """Get in-progress jobs from Redis with filtering options (only returns active jobs)"""
     try:
+        # Only allow in-progress statuses
+        in_progress_statuses = ["pending", "processing", "uploading", "validation_passed"]
+        if status and status not in in_progress_statuses:
+            return {
+                "jobs": [],
+                "count": 0,
+                "filters": {
+                    "username": username,
+                    "campaign": campaign,
+                    "status": status,
+                    "limit": limit
+                },
+                "message": f"Only in-progress statuses are supported: {in_progress_statuses}",
+                "timestamp": redis_manager.get_current_ny_time()
+            }
+        
         jobs = redis_manager.get_jobs(
             username=username, 
             campaign=campaign, 
@@ -297,15 +287,22 @@ async def get_jobs(
             limit=limit
         )
         
+        # Filter to only in-progress jobs
+        in_progress_jobs = [
+            job for job in jobs 
+            if job.get("status") in in_progress_statuses
+        ]
+        
         return {
-            "jobs": jobs,
-            "count": len(jobs),
+            "jobs": in_progress_jobs,
+            "count": len(in_progress_jobs),
             "filters": {
                 "username": username,
                 "campaign": campaign,
                 "status": status,
                 "limit": limit
             },
+            "note": "Only in-progress jobs are returned",
             "timestamp": redis_manager.get_current_ny_time()
         }
         
