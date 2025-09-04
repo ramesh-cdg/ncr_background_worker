@@ -14,21 +14,21 @@ This guide covers deploying the NCR Upload API with Celery in production using D
 
 ## Prerequisites
 
-1. **Docker & Docker Compose** installed (V2 recommended, V1 supported)
+1. **Docker & Docker Compose** installed (latest version)
 2. **Environment file** configured
 3. **External database** accessible (MySQL/PostgreSQL)
 4. **SFTP server** accessible
 
-### Docker Compose Version Check
+### Docker Compose Requirements
 
-Run the version check script to ensure compatibility:
+Ensure you have the latest Docker Compose installed:
 
 ```bash
-chmod +x docker-compose-check.sh
-./docker-compose-check.sh
-```
+# Check Docker Compose version
+docker compose version
 
-This will detect and verify your Docker Compose installation.
+# Should show version 2.x or higher
+```
 
 ## Quick Start
 
@@ -110,7 +110,7 @@ CELERY_WORKER_MAX_MEMORY_PER_CHILD=200000
 - **Health Checks**: Comprehensive health monitoring with start periods
 - **Build Context**: Explicit build context and dockerfile specification
 - **Redis Optimization**: Memory management and LRU eviction policy
-- **Compatibility**: Works with both Docker Compose V1 and V2
+- **Latest Syntax**: Uses modern Docker Compose commands and features
 
 ## Zero-Downtime Deployment
 

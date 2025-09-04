@@ -1,5 +1,5 @@
 # Docker Compose file for NCR Upload API
-# Compatible with Docker Compose V2 (docker compose) and V1 (docker-compose)
+# Uses latest Docker Compose syntax
 
 services:
   # Redis for Celery broker and result backend
@@ -24,7 +24,6 @@ services:
     build: 
       context: .
       dockerfile: Dockerfile
-    container_name: ncr_web
     ports:
       - "8001:8001"  # Changed to port 8001
     environment:
@@ -55,7 +54,6 @@ services:
     build: 
       context: .
       dockerfile: Dockerfile
-    container_name: ncr_worker
     command: python start_worker.py worker --concurrency 4
     environment:
       - REDIS_HOST=redis
@@ -85,7 +83,6 @@ services:
     build: 
       context: .
       dockerfile: Dockerfile
-    container_name: ncr_beat
     command: python start_worker.py beat
     environment:
       - REDIS_HOST=redis
@@ -108,7 +105,6 @@ services:
     build: 
       context: .
       dockerfile: Dockerfile
-    container_name: ncr_flower
     command: python start_worker.py flower
     ports:
       - "5555:5555"

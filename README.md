@@ -40,7 +40,7 @@ ncr_background_worker/
 
 ## Prerequisites
 
-- **Docker & Docker Compose** (for production)
+- **Docker & Docker Compose** (latest version)
 - **Python 3.8+** (for development)
 - **Redis server** (port 6380)
 - **External database** (MySQL/PostgreSQL)
