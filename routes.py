@@ -139,7 +139,33 @@ async def get_job_status_endpoint(task_id: str):
                 timestamp=datetime.fromisoformat(job_data["timestamp"])
             )
         else:
-            raise HTTPException(status_code=404, detail=f"Job not found with task_id: {task_id}")
+            # Job not found in Redis - check if it was completed and removed
+            from celery.result import AsyncResult
+            result = AsyncResult(task_id, app=celery_app)
+            
+            if result.ready() and result.successful():
+                # Job completed successfully and was removed from Redis
+                return JobStatusResponse(
+                    job_id="unknown",  # We don't have this info anymore
+                    task_id=task_id,
+                    status="completed",
+                    progress={"percentage": 100},
+                    message="Job completed successfully and removed from Redis",
+                    timestamp=datetime.now()
+                )
+            elif result.ready() and not result.successful():
+                # Job failed
+                return JobStatusResponse(
+                    job_id="unknown",
+                    task_id=task_id,
+                    status="failed",
+                    progress={"percentage": 0},
+                    message=f"Job failed: {str(result.result)}",
+                    timestamp=datetime.now()
+                )
+            else:
+                # Job still processing but not in Redis (shouldn't happen)
+                raise HTTPException(status_code=404, detail=f"Job not found with task_id: {task_id}")
             
     except HTTPException:
         raise

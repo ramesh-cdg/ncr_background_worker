@@ -228,58 +228,51 @@ def process_job_task(
             
             print(f"📋 [TASK {task_id}] Validation result: {validation_result}")
             
+            # Upload files regardless of validation result
+            redis_manager.update_job_status(task_id, JobStatus.UPLOADING, f"Uploading {len(all_local_files)} files to SFTP server")
+            print(f"⬆️ [TASK {task_id}] Starting upload of {len(all_local_files)} files to SFTP...")
+            for i, local_path in enumerate(all_local_files):
+                relative_path = os.path.relpath(local_path, download_dir)
+                remote_path = os.path.join(remote_base_dir, relative_path)
+                
+                print(f"   📤 [TASK {task_id}] Uploading file {i + 1}/{len(all_local_files)}:")
+                print(f"      - Local: {local_path}")
+                print(f"      - Remote: {remote_path}")
+                
+                redis_manager.update_job_status(
+                    task_id, 
+                    JobStatus.UPLOADING, 
+                    f"Uploading: {os.path.basename(local_path)}",
+                    {
+                        "current_file": os.path.basename(local_path), 
+                        "processed_files": i + 1, 
+                        "total_files": len(all_local_files),
+                        "percentage": int(((i + 1) / len(all_local_files)) * 100)
+                    }
+                )
+                
+                try:
+                    SFTPManager.upload_to_sftp(sftp, local_path, remote_path)
+                    print(f"      ✅ Uploaded successfully")
+                except Exception as e:
+                    print(f"      ❌ Upload failed: {e}")
+                    raise e
+            
+            # Cleanup
+            redis_manager.update_job_status(task_id, JobStatus.PROCESSING, "Cleaning up temporary files")
+            print(f"🧹 [TASK {task_id}] Cleaning up temporary files...")
+            FileProcessor.cleanup_files(all_local_files, zip_path, download_dir)
+            print(f"   ✅ Cleanup completed")
+            
+            # Task completed successfully - remove from Redis
+            redis_manager.client.delete(f"job:{task_id}")
+            print(f"🎉 [TASK {task_id}] Job completed successfully and removed from Redis!")
+            
+            # Return validation result for reference, but task status is always success
             if validation_result:
-                redis_manager.update_job_status(task_id, JobStatus.VALIDATION_PASSED, "Validation passed, preparing to upload files")
-                
-                # Upload files
-                redis_manager.update_job_status(task_id, JobStatus.UPLOADING, f"Uploading {len(all_local_files)} files to SFTP server")
-                print(f"⬆️ [TASK {task_id}] Starting upload of {len(all_local_files)} files to SFTP...")
-                for i, local_path in enumerate(all_local_files):
-                    relative_path = os.path.relpath(local_path, download_dir)
-                    remote_path = os.path.join(remote_base_dir, relative_path)
-                    
-                    print(f"   📤 [TASK {task_id}] Uploading file {i + 1}/{len(all_local_files)}:")
-                    print(f"      - Local: {local_path}")
-                    print(f"      - Remote: {remote_path}")
-                    
-                    redis_manager.update_job_status(
-                        task_id, 
-                        JobStatus.UPLOADING, 
-                        f"Uploading: {os.path.basename(local_path)}",
-                        {
-                            "current_file": os.path.basename(local_path), 
-                            "processed_files": i + 1, 
-                            "total_files": len(all_local_files),
-                            "percentage": int(((i + 1) / len(all_local_files)) * 100)
-                        }
-                    )
-                    
-                    try:
-                        SFTPManager.upload_to_sftp(sftp, local_path, remote_path)
-                        print(f"      ✅ Uploaded successfully")
-                    except Exception as e:
-                        print(f"      ❌ Upload failed: {e}")
-                        raise e
-                
-                # Cleanup
-                redis_manager.update_job_status(task_id, JobStatus.PROCESSING, "Cleaning up temporary files")
-                print(f"🧹 [TASK {task_id}] Cleaning up temporary files...")
-                FileProcessor.cleanup_files(all_local_files, zip_path, download_dir)
-                print(f"   ✅ Cleanup completed")
-                
-                redis_manager.update_job_status(task_id, JobStatus.COMPLETED, "Job completed successfully - all files uploaded")
-                print(f"🎉 [TASK {task_id}] Job completed successfully!")
-                return {"status": "completed", "message": "Job completed successfully"}
-                
+                return {"status": "completed", "message": "Job completed successfully", "validation_result": "passed"}
             else:
-                print(f"❌ [TASK {task_id}] Validation failed!")
-                redis_manager.update_job_status(task_id, JobStatus.VALIDATION_FAILED, "Validation failed - files rejected by validation service")
-                
-                # Cleanup on validation failure (no status update needed)
-                print(f"🧹 [TASK {task_id}] Cleaning up files after validation failure...")
-                FileProcessor.cleanup_files(all_local_files, zip_path, download_dir)
-                print(f"   ✅ Cleanup completed")
-                return {"status": "validation_failed", "message": "Validation failed"}
+                return {"status": "completed", "message": "Job completed successfully", "validation_result": "failed"}
         
         finally:
             # Close SFTP connection
