@@ -64,18 +64,22 @@ def create_celery_app() -> Celery:
         worker_hijack_root_logger=False,
         worker_log_color=False,
         
-        # Event Settings - Disable events to fix dispatcher issue
-        worker_send_task_events=False,
-        task_send_sent_event=False,
-        worker_enable_remote_control=False,
+        # Event Settings - Enable events for Flower monitoring
+        worker_send_task_events=True,
+        task_send_sent_event=True,
+        worker_enable_remote_control=True,
         
-        # Beat Schedule (for periodic tasks) - Disabled for now
-        # beat_schedule={
-        #     'memory-monitor': {
-        #         'task': 'tasks.memory_monitor_task',
-        #         'schedule': settings.memory_check_interval,  # seconds
-        #     },
-        # },
+        # Beat Schedule (for periodic tasks)
+        beat_schedule={
+            'memory-monitor': {
+                'task': 'tasks.memory_monitor_task',
+                'schedule': settings.memory_check_interval,  # seconds
+            },
+            'cleanup-old-jobs': {
+                'task': 'tasks.cleanup_old_jobs',
+                'schedule': 3600,  # Run every hour
+            },
+        },
     )
     
     return app

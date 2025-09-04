@@ -84,10 +84,23 @@ def start_flower():
         '-A', 'celery_app',
         'flower',
         '--port=5555',
-        f'--broker={settings.celery_broker_url}'
+        f'--broker={settings.celery_broker_url}',
+        '--address=0.0.0.0',
+        '--basic_auth=admin:admin123',  # Basic auth for security
+        '--max_tasks=10000',  # Keep more task history
+        '--persistent=True',  # Persist data
+        '--db=flower.db',  # SQLite database for persistence
+        '--enable_events=True',  # Enable task events
+        '--purge_offline_workers=60',  # Remove offline workers after 60 seconds
     ]
     
     print("Starting Flower monitoring on http://localhost:5555")
+    print("Login: admin / admin123")
+    print("Features enabled:")
+    print("  - Task history (10,000 tasks)")
+    print("  - Persistent storage")
+    print("  - Event monitoring")
+    print("  - Auto-cleanup of offline workers")
     
     try:
         subprocess.run(cmd, check=True)

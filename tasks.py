@@ -3,6 +3,7 @@ Celery tasks for NCR Upload API with memory management and batch processing
 """
 import os
 import uuid
+from datetime import datetime
 from typing import Optional, List, Dict, Any
 from celery import current_task, group, chain
 from celery.exceptions import Retry, WorkerLostError
@@ -17,7 +18,7 @@ from models import JobStatus
 from config import settings
 
 
-@celery_app.task(bind=True, name='tasks.process_job_task')
+@celery_app.task(bind=True, name='tasks.process_job_task', autoretry_for=(Exception,), retry_kwargs={'max_retries': 2, 'countdown': 60})
 def process_job_task(
     self, 
     job_id: str, 
@@ -171,6 +172,10 @@ def process_job_task(
         error_msg = f"Job processing failed: {str(e)}"
         redis_manager.update_job_status(task_id, JobStatus.FAILED, error_msg)
         print(f"Error processing job {job_id}: {e}")
+        
+        # Schedule cleanup for failed job after 1 hour
+        cleanup_failed_job.apply_async(args=[task_id], countdown=3600)
+        
         return {"status": "failed", "message": error_msg}
 
 
@@ -271,6 +276,24 @@ def memory_monitor_task() -> Dict[str, Any]:
         return {"status": "error", "message": str(e)}
 
 
+@celery_app.task(name='tasks.cleanup_failed_job')
+def cleanup_failed_job(task_id: str) -> Dict[str, Any]:
+    """
+    Clean up a specific failed job from Redis
+    """
+    try:
+        job_data = redis_manager.get_job_status(task_id)
+        if job_data and job_data["status"] == JobStatus.FAILED:
+            redis_manager.client.delete(f"job:{task_id}")
+            print(f"Cleaned up failed job: {task_id}")
+            return {"status": "success", "task_id": task_id, "message": "Failed job cleaned up"}
+        else:
+            return {"status": "skipped", "task_id": task_id, "message": "Job not found or not failed"}
+    except Exception as e:
+        print(f"Error cleaning up failed job {task_id}: {e}")
+        return {"status": "error", "task_id": task_id, "message": str(e)}
+
+
 @celery_app.task(name='tasks.cleanup_old_jobs')
 def cleanup_old_jobs() -> Dict[str, Any]:
     """
@@ -278,6 +301,7 @@ def cleanup_old_jobs() -> Dict[str, Any]:
     """
     try:
         cleaned_count = 0
+        failed_count = 0
         current_time = redis_manager.get_current_ny_time()
         
         # Get all job keys
@@ -287,17 +311,31 @@ def cleanup_old_jobs() -> Dict[str, Any]:
             
             if job_data:
                 # Check if job is old and completed/failed
-                job_timestamp = redis_manager.get_current_ny_time().fromisoformat(job_data["timestamp"])
-                time_diff = (current_time - job_timestamp).total_seconds()
-                
-                if (time_diff > settings.job_expire_hours * 3600 and 
-                    job_data["status"] in [JobStatus.COMPLETED, JobStatus.FAILED]):
+                try:
+                    job_timestamp = datetime.fromisoformat(job_data["timestamp"])
+                    time_diff = (current_time - job_timestamp).total_seconds()
                     
+                    # Clean up jobs older than configured hours
+                    if time_diff > settings.job_expire_hours * 3600:
+                        if job_data["status"] in [JobStatus.COMPLETED, JobStatus.FAILED]:
+                            redis_manager.client.delete(key)
+                            cleaned_count += 1
+                            if job_data["status"] == JobStatus.FAILED:
+                                failed_count += 1
+                        elif job_data["status"] == JobStatus.PENDING:
+                            # Clean up very old pending jobs (older than 24 hours)
+                            if time_diff > 24 * 3600:
+                                redis_manager.client.delete(key)
+                                cleaned_count += 1
+                                print(f"Cleaned up stale pending job: {task_id}")
+                except Exception as e:
+                    print(f"Error processing job {task_id}: {e}")
+                    # If we can't parse the timestamp, clean it up
                     redis_manager.client.delete(key)
                     cleaned_count += 1
         
-        print(f"Cleaned up {cleaned_count} old jobs")
-        return {"status": "success", "cleaned_count": cleaned_count}
+        print(f"Cleaned up {cleaned_count} old jobs ({failed_count} failed)")
+        return {"status": "success", "cleaned_count": cleaned_count, "failed_count": failed_count}
         
     except Exception as e:
         print(f"Error cleaning up old jobs: {e}")

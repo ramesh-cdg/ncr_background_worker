@@ -259,10 +259,77 @@ async def get_celery_stats():
         # Get worker stats
         stats = inspect.stats()
         
+        # Get registered tasks
+        registered_tasks = inspect.registered()
+        
         return {
             "active_tasks": active_tasks,
             "scheduled_tasks": scheduled_tasks,
             "worker_stats": stats,
+            "registered_tasks": registered_tasks,
+            "timestamp": redis_manager.get_current_ny_time()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/cleanup-failed-jobs")
+async def cleanup_failed_jobs():
+    """Manually trigger cleanup of failed jobs"""
+    try:
+        from tasks import cleanup_old_jobs
+        
+        # Run cleanup task
+        result = cleanup_old_jobs.delay()
+        cleanup_result = result.get(timeout=30)
+        
+        return {
+            "status": "success",
+            "message": "Cleanup task completed",
+            "result": cleanup_result,
+            "timestamp": redis_manager.get_current_ny_time()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/redis-stats")
+async def get_redis_stats():
+    """Get Redis statistics and job counts"""
+    try:
+        # Get Redis info
+        redis_info = redis_manager.client.info()
+        
+        # Count jobs by status
+        job_counts = {
+            "total": 0,
+            "pending": 0,
+            "processing": 0,
+            "completed": 0,
+            "failed": 0,
+            "validation_passed": 0,
+            "validation_failed": 0,
+            "uploading": 0
+        }
+        
+        for key in redis_manager.client.scan_iter("job:*"):
+            task_id = key.split(":")[1]
+            job_data = redis_manager.get_job_status(task_id)
+            if job_data:
+                job_counts["total"] += 1
+                status = job_data.get("status", "unknown")
+                if status in job_counts:
+                    job_counts[status] += 1
+        
+        return {
+            "redis_info": {
+                "used_memory": redis_info.get("used_memory_human"),
+                "connected_clients": redis_info.get("connected_clients"),
+                "total_commands_processed": redis_info.get("total_commands_processed"),
+                "keyspace_hits": redis_info.get("keyspace_hits"),
+                "keyspace_misses": redis_info.get("keyspace_misses"),
+            },
+            "job_counts": job_counts,
             "timestamp": redis_manager.get_current_ny_time()
         }
     except Exception as e:
