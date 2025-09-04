@@ -275,8 +275,7 @@ def process_job_task(
                 print(f"❌ [TASK {task_id}] Validation failed!")
                 redis_manager.update_job_status(task_id, JobStatus.VALIDATION_FAILED, "Validation failed - files rejected by validation service")
                 
-                # Cleanup on validation failure
-                redis_manager.update_job_status(task_id, JobStatus.PROCESSING, "Cleaning up files after validation failure")
+                # Cleanup on validation failure (no status update needed)
                 print(f"🧹 [TASK {task_id}] Cleaning up files after validation failure...")
                 FileProcessor.cleanup_files(all_local_files, zip_path, download_dir)
                 print(f"   ✅ Cleanup completed")
