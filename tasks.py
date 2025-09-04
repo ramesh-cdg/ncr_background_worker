@@ -339,6 +339,16 @@ def batch_process_jobs(self, job_requests: List[Dict[str, Any]]) -> Dict[str, An
                 job_req.get('row_id')
             )
             
+            # Create Redis job status entry for individual job
+            redis_manager.create_job_status(
+                job_req['job_id'],
+                task_result.id,  # Use Celery task ID as primary task ID
+                job_req['username'],
+                job_req['campaign'],
+                job_req.get('row_id'),
+                celery_task_id=task_result.id
+            )
+            
             results.append({
                 "job_id": job_req['job_id'],
                 "task_id": task_result.id,
