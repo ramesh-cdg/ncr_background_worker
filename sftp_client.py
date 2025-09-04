@@ -38,17 +38,24 @@ class SFTPManager:
                 else:
                     sftp.remove(full_path)
             sftp.rmdir(path)
+        except FileNotFoundError:
+            # Folder doesn't exist, which is fine for new jobs
+            pass
         except Exception as e:
-            print(f"Failed on path: {path} — {e}")
+            print(f"Failed to delete folder {path}: {e}")
     
     @staticmethod
     def check_and_delete_folder(sftp: paramiko.SFTPClient, remote_base_dir: str):
         """Check if folder exists and delete it"""
         if SFTPManager.folder_exists(sftp, remote_base_dir):
+            print(f"Deleting existing folder: {remote_base_dir}")
             try:
                 SFTPManager.delete_remote_folder(sftp, remote_base_dir)
+                print(f"Successfully deleted folder: {remote_base_dir}")
             except Exception as e:
-                print(f"Error deleting folder: {e}")
+                print(f"Error deleting folder {remote_base_dir}: {e}")
+        else:
+            print(f"Folder {remote_base_dir} does not exist, skipping deletion")
     
     @staticmethod
     def ensure_remote_dir(sftp: paramiko.SFTPClient, remote_dir: str):
