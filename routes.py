@@ -213,7 +213,7 @@ async def process_batch_jobs_endpoint(
 
 @router.get("/batch-status/{username}")
 async def get_batch_status(username: str):
-    """Get batch processing status by username"""
+    """Get batch processing status by username with real-time individual task updates"""
     try:
         print(f"🔍 [API] Getting batch status for username: {username}")
         
@@ -226,50 +226,126 @@ async def get_batch_status(username: str):
         if not batch_id:
             raise HTTPException(status_code=404, detail=f"Invalid batch data for username: {username}")
         
-        # Get current batch status from Celery
-        from celery.result import AsyncResult
-        result = AsyncResult(batch_id, app=celery_app)
+        # Get job IDs from batch data
+        job_ids_str = batch_data.get("job_ids", "")
+        job_ids = [job_id.strip() for job_id in job_ids_str.split(",") if job_id.strip()]
         
-        if result.ready():
-            if result.successful():
-                batch_status = "completed"
-                batch_result = result.result
-            else:
-                batch_status = "failed"
-                batch_result = str(result.result)
-        else:
-            batch_status = "processing"
-            batch_result = None
+        print(f"📋 [BATCH] Processing {len(job_ids)} job IDs: {job_ids}")
         
-        # Get individual job results
+        # Get real-time status for each individual job
         individual_results = []
-        if batch_result and "job_results" in batch_result:
-            for job in batch_result["job_results"]:
-                task_id = job.get("task_id")
-                if task_id:
-                    try:
-                        task_result = AsyncResult(task_id, app=celery_app)
-                        if task_result.ready():
+        completed_job_ids = []
+        
+        for job_id in job_ids:
+            print(f"🔍 [BATCH] Checking status for job_id: {job_id}")
+            
+            # First check Redis for real-time status (if job is still in progress)
+            redis_jobs = redis_manager.get_jobs_by_job_id(job_id)
+            
+            if redis_jobs:
+                # Job is still in Redis (in progress)
+                job = redis_jobs[0]  # Get the first (and should be only) job
+                individual_results.append({
+                    "job_id": job_id,
+                    "task_id": job.get("task_id", ""),
+                    "status": job.get("status", "unknown"),
+                    "message": job.get("message", ""),
+                    "progress": job.get("progress", {}),
+                    "timestamp": job.get("timestamp", "")
+                })
+                print(f"   ✅ Found in Redis - Status: {job.get('status')}")
+            else:
+                # Job not in Redis (completed/failed) - check Celery result
+                print(f"   🔍 Not in Redis, checking Celery result...")
+                
+                # Get batch result to find individual task results
+                from celery.result import AsyncResult
+                batch_result = AsyncResult(batch_id, app=celery_app)
+                
+                if batch_result.ready() and batch_result.successful():
+                    batch_data_result = batch_result.result
+                    if "job_results" in batch_data_result:
+                        # Find this job in the batch results
+                        job_found = False
+                        for job_result in batch_data_result["job_results"]:
+                            if job_result.get("job_id") == job_id:
+                                task_id = job_result.get("task_id")
+                                if task_id:
+                                    try:
+                                        task_result = AsyncResult(task_id, app=celery_app)
+                                        if task_result.ready():
+                                            status = "completed" if task_result.successful() else "failed"
+                                            individual_results.append({
+                                                "job_id": job_id,
+                                                "task_id": task_id,
+                                                "status": status,
+                                                "message": f"Job {status}",
+                                                "result": task_result.result if task_result.successful() else str(task_result.result),
+                                                "timestamp": redis_manager.get_current_ny_time().isoformat()
+                                            })
+                                            completed_job_ids.append(job_id)
+                                            print(f"   ✅ Found in Celery result - Status: {status}")
+                                            job_found = True
+                                            break
+                                    except Exception as e:
+                                        print(f"   ❌ Error checking Celery result: {e}")
+                                        individual_results.append({
+                                            "job_id": job_id,
+                                            "task_id": "",
+                                            "status": "error",
+                                            "message": f"Error checking result: {str(e)}",
+                                            "timestamp": redis_manager.get_current_ny_time().isoformat()
+                                        })
+                                        job_found = True
+                                        break
+                        
+                        if not job_found:
+                            # Job not found in batch results - assume completed
                             individual_results.append({
-                                "job_id": job.get("job_id"),
-                                "task_id": task_id,
-                                "status": "completed" if task_result.successful() else "failed",
-                                "result": task_result.result if task_result.successful() else str(task_result.result)
+                                "job_id": job_id,
+                                "task_id": "",
+                                "status": "completed",
+                                "message": "Job completed (not found in batch results)",
+                                "timestamp": redis_manager.get_current_ny_time().isoformat()
                             })
-                        else:
-                            individual_results.append({
-                                "job_id": job.get("job_id"),
-                                "task_id": task_id,
-                                "status": "processing",
-                                "result": None
-                            })
-                    except Exception as e:
+                            completed_job_ids.append(job_id)
+                            print(f"   ✅ Assumed completed (not in batch results)")
+                    else:
+                        # No job results in batch - assume all completed
                         individual_results.append({
-                            "job_id": job.get("job_id"),
-                            "task_id": task_id,
-                            "status": "error",
-                            "result": str(e)
+                            "job_id": job_id,
+                            "task_id": "",
+                            "status": "completed",
+                            "message": "Job completed (batch finished)",
+                            "timestamp": redis_manager.get_current_ny_time().isoformat()
                         })
+                        completed_job_ids.append(job_id)
+                        print(f"   ✅ Assumed completed (batch finished)")
+                else:
+                    # Batch not ready yet, but job not in Redis - this shouldn't happen
+                    individual_results.append({
+                        "job_id": job_id,
+                        "task_id": "",
+                        "status": "unknown",
+                        "message": "Job status unknown",
+                        "timestamp": redis_manager.get_current_ny_time().isoformat()
+                    })
+                    print(f"   ❓ Status unknown")
+        
+        # Clean up completed jobs from batch tracking
+        if completed_job_ids:
+            # Remove completed job IDs from batch tracking
+            remaining_job_ids = [job_id for job_id in job_ids if job_id not in completed_job_ids]
+            redis_manager.client.hset(f"batch:{username}", "job_ids", ",".join(remaining_job_ids))
+            print(f"🧹 [BATCH] Removed completed jobs from batch tracking: {completed_job_ids}")
+        
+        # Determine overall batch status
+        batch_status = "processing"
+        if not any(r["status"] in ["pending", "processing"] for r in individual_results):
+            batch_status = "completed"
+            # Remove batch from Redis when all jobs are done
+            redis_manager.client.delete(f"batch:{username}")
+            print(f"🗑️ [BATCH] All jobs completed - removed batch from Redis")
         
         return {
             "username": username,
@@ -280,7 +356,7 @@ async def get_batch_status(username: str):
             "individual_results": individual_results,
             "completed_jobs": len([r for r in individual_results if r["status"] == "completed"]),
             "failed_jobs": len([r for r in individual_results if r["status"] == "failed"]),
-            "processing_jobs": len([r for r in individual_results if r["status"] == "processing"]),
+            "processing_jobs": len([r for r in individual_results if r["status"] in ["pending", "processing"]]),
             "timestamp": redis_manager.get_current_ny_time()
         }
         
