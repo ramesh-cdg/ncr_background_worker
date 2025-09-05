@@ -18,6 +18,7 @@ This guide covers deploying the NCR Upload API with Celery in production using D
 - **Memory Management**: Automatic worker recycling and memory monitoring
 - **Zero-Downtime Deployments**: Rolling updates without service interruption
 - **Health Monitoring**: Comprehensive health checks and monitoring
+- **Clean Redis**: No historical data accumulation - only active tasks
 
 ## Prerequisites
 
@@ -149,6 +150,7 @@ The deployment script provides zero-downtime updates:
 - **Smart queueing** - jobs always accepted and queued
 - **Worker recycling** after 1000 tasks or 200MB memory usage
 - **Concurrency control** - Celery manages worker capacity
+- **Clean Redis** - completed/failed tasks removed immediately
 
 ### Memory Configuration
 
@@ -180,7 +182,22 @@ CELERY_TASK_TIME_LIMIT=3900       # 1 hour 5 minutes
 - `GET /health` - Overall system health
 - `GET /memory-stats` - Memory usage statistics
 - `GET /celery-stats` - Celery worker statistics
-- `GET /jobs/active` - Active job status
+- `GET /redis-stats` - Redis statistics and job counts
+- `GET /running-tasks` - All active tasks
+
+### API Endpoints
+
+#### Core Endpoints
+- `POST /process-job` - Start a single job
+- `GET /job-status/{job_id}/{username}` - Get job status
+- `GET /running-tasks` - Get all running tasks
+
+#### Batch Processing
+- `POST /process-batch` - Process multiple jobs
+- `GET /batch-status/{username}` - Get batch status by username
+
+#### System Management
+- `POST /redis/reset` - Reset Redis data (requires password)
 
 ### Flower Dashboard
 
@@ -265,6 +282,7 @@ ls -la backups/
 - Environment variable secrets
 - Health check endpoints
 - Rate limiting (if using reverse proxy)
+- Redis reset endpoint password protection
 
 ## Performance Tuning
 
@@ -321,6 +339,14 @@ CELERY_WORKER_MAX_MEMORY_PER_CHILD=200000
    
    # Restart workers
    docker-compose restart worker
+   ```
+
+4. **Job Not Found Issues**
+   ```bash
+   # Check running tasks
+   curl http://localhost:8001/running-tasks
+   
+   # Note: Completed/failed jobs are removed immediately from Redis
    ```
 
 ### Debug Mode
@@ -427,6 +453,8 @@ docker stats
 curl http://localhost:8001/health
 curl http://localhost:8001/memory-stats
 curl http://localhost:8001/celery-stats
+curl http://localhost:8001/redis-stats
+curl http://localhost:8001/running-tasks
 
 # Monitor Flower dashboard
 open http://localhost:5555
@@ -441,6 +469,7 @@ open http://localhost:5555
 3. **Review logs for errors**
 4. **Update dependencies**
 5. **Clean up old backups**
+6. **Monitor Redis memory usage** (should stay low due to no historical data)
 
 ### Updates
 
@@ -452,6 +481,18 @@ git pull
 # Update dependencies
 docker-compose build --no-cache
 ./deploy.sh deploy
+```
+
+### Redis Maintenance
+
+```bash
+# Reset Redis data if needed (requires password)
+curl -X POST "http://localhost:8001/redis/reset" \
+     -H "Content-Type: application/json" \
+     -d '{"password": "reset@2025"}'
+
+# Check Redis stats
+curl http://localhost:8001/redis-stats
 ```
 
 ## Production Checklist
@@ -467,6 +508,8 @@ docker-compose build --no-cache
 - [ ] Memory limits appropriate
 - [ ] Logging configured
 - [ ] Security measures in place
+- [ ] Redis reset password configured
+- [ ] No historical data accumulation verified
 
 ## Support
 
@@ -474,4 +517,5 @@ For issues or questions:
 1. Check logs: `docker-compose logs -f`
 2. Check health: `./deploy.sh health`
 3. Monitor resources: `./deploy.sh monitor`
-4. Review this documentation
+4. Check running tasks: `curl http://localhost:8001/running-tasks`
+5. Review this documentation

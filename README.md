@@ -13,6 +13,7 @@ A production-ready FastAPI application with Celery for robust background job pro
 - **🛡️ Production Ready**: Docker containers, health checks, and automatic recovery
 - **📁 File Processing**: Wasabi S3 downloads, validation, and SFTP uploads
 - **⚡ High Performance**: Gunicorn workers with optimized concurrency control
+- **🧹 Clean Redis**: No historical data accumulation - only active tasks
 
 ## Project Structure
 
@@ -26,7 +27,7 @@ ncr_background_worker/
 ├── redis_manager.py           # Redis job management
 ├── file_processor.py          # File processing utilities
 ├── validation_service.py      # Validation service
-├── routes.py                  # API routes
+├── routes.py                  # API routes (simplified)
 ├── celery_app.py              # Celery application configuration
 ├── tasks.py                   # Celery tasks with memory management
 ├── start_worker.py            # Celery worker startup script
@@ -84,7 +85,7 @@ The application uses a modern microservices architecture:
 
 - **FastAPI Web Service**: 4 Gunicorn workers handling HTTP requests
 - **Celery Workers**: 4 background workers processing jobs
-- **Redis**: Message broker and job queue storage
+- **Redis**: Message broker and job queue storage (no historical data)
 - **Smart Queueing**: Always accepts jobs, Celery manages concurrency
 
 ## Development Setup
@@ -129,19 +130,21 @@ python main.py
 
 - `GET /` - Root endpoint with API information
 - `POST /process-job` - Start a new job processing
-- `GET /job-status/{task_id}` - Get job status by task ID
+- `GET /job-status/{job_id}/{username}` - Get job status by job_id and username
+- `GET /running-tasks` - Get all running tasks
 - `GET /health` - Health check endpoint
-- `GET /jobs/active` - Get all active jobs
 
 ### Batch Processing
 
 - `POST /process-batch` - Process multiple jobs in batch
-- `GET /batch-status/{batch_id}` - Get batch processing status
+- `GET /batch-status/{username}` - Get batch processing status by username
 
-### Monitoring
+### System Management
 
+- `POST /redis/reset` - Reset all Redis data (requires password)
 - `GET /memory-stats` - Memory usage statistics
 - `GET /celery-stats` - Celery worker statistics
+- `GET /redis-stats` - Redis statistics
 
 ### API Documentation
 
@@ -152,7 +155,7 @@ Once the server is running, visit:
 
 ## Usage
 
-### Starting a Job
+### Starting a Single Job
 
 ```bash
 curl -X POST "http://localhost:8001/process-job" \
@@ -168,13 +171,55 @@ curl -X POST "http://localhost:8001/process-job" \
 **Response:**
 ```json
 {
-  "task_id": "uuid-task-id",
-  "status": "queued",
-  "message": "Job queued for processing"
+  "job_id": "your-job-id",
+  "status": "processing",
+  "message": "Job processing started",
+  "timestamp": "2024-01-15T10:30:00",
+  "task_id": "uuid-task-id"
 }
 ```
 
-**Note:** Jobs are always accepted and queued. The system will process them when workers are available.
+### Getting Job Status
+
+```bash
+curl "http://localhost:8001/job-status/your-job-id/your-username"
+```
+
+**Response:**
+```json
+{
+  "job_id": "your-job-id",
+  "username": "your-username",
+  "task_id": "uuid-task-id",
+  "status": "processing",
+  "message": "Processing files...",
+  "campaign": "your-campaign",
+  "row_id": 123,
+  "timestamp": "2024-01-15T10:30:00"
+}
+```
+
+### Getting All Running Tasks
+
+```bash
+curl "http://localhost:8001/running-tasks"
+```
+
+**Response:**
+```json
+{
+  "running_tasks": [
+    {
+      "job_id": "job-1",
+      "username": "user1",
+      "status": "processing",
+      "message": "Processing files..."
+    }
+  ],
+  "count": 1,
+  "timestamp": "2024-01-15T10:30:00"
+}
+```
 
 ### Batch Processing
 
@@ -185,32 +230,80 @@ curl -X POST "http://localhost:8001/process-batch" \
        {
          "job_id": "job-1",
          "username": "user1",
-         "campaign": "campaign1"
+         "campaign": "campaign1",
+         "row_id": 1
        },
        {
          "job_id": "job-2", 
-         "username": "user2",
-         "campaign": "campaign2"
+         "username": "user1",
+         "campaign": "campaign1",
+         "row_id": 2
        }
      ]'
 ```
 
-### Checking Job Status
-
-```bash
-curl "http://localhost:8001/job-status/{task_id}"
+**Response:**
+```json
+{
+  "batch_id": "batch-uuid",
+  "total_jobs": 2,
+  "common_username": "user1",
+  "status": "processing",
+  "message": "Batch processing started for 2 jobs with username 'user1'",
+  "timestamp": "2024-01-15T10:30:00"
+}
 ```
 
-### Memory Statistics
+### Getting Batch Status
 
 ```bash
-curl "http://localhost:8001/memory-stats"
+curl "http://localhost:8001/batch-status/user1"
 ```
 
-### Health Check
+**Response:**
+```json
+{
+  "username": "user1",
+  "batch_id": "batch-uuid",
+  "status": "processing",
+  "total_jobs": 2,
+  "individual_results": [
+    {
+      "job_id": "job-1",
+      "task_id": "task-uuid-1",
+      "status": "processing",
+      "result": null
+    },
+    {
+      "job_id": "job-2",
+      "task_id": "task-uuid-2", 
+      "status": "completed",
+      "result": {"status": "completed", "validation_result": "passed"}
+    }
+  ],
+  "completed_jobs": 1,
+  "failed_jobs": 0,
+  "processing_jobs": 1,
+  "timestamp": "2024-01-15T10:30:00"
+}
+```
+
+### Resetting Redis Data
 
 ```bash
-curl "http://localhost:8001/health"
+curl -X POST "http://localhost:8001/redis/reset" \
+     -H "Content-Type: application/json" \
+     -d '{"password": "reset@2025"}'
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Redis data reset successfully - deleted 15 keys",
+  "deleted_keys": 15,
+  "timestamp": "2024-01-15T10:30:00"
+}
 ```
 
 ## Job Processing Flow
@@ -221,10 +314,12 @@ curl "http://localhost:8001/health"
 4. **File Retrieval**: Files are retrieved from database and Wasabi S3
 5. **Structure Organization**: Files are organized according to business logic
 6. **Validation**: Files are zipped and sent to validator API
-7. **Upload**: If validation passes, files are uploaded to SFTP server
+7. **Upload Decision**: 
+   - If validation passes: Files are uploaded to SFTP server
+   - If validation fails: Files are NOT uploaded, task completes with failed validation
 8. **Status Updates**: Real-time status updates via Redis
 9. **Cleanup**: Temporary files are cleaned up automatically
-10. **Memory Management**: Automatic worker recycling and memory monitoring
+10. **Redis Cleanup**: Completed/failed tasks are immediately removed from Redis (no historical data)
 
 ## Configuration
 
@@ -301,7 +396,7 @@ python main.py
 - **validation_service.py**: External validation API integration
 - **celery_app.py**: Celery application configuration
 - **tasks.py**: Celery tasks with memory management
-- **routes.py**: FastAPI route definitions
+- **routes.py**: FastAPI route definitions (simplified API)
 - **main.py**: Application entry point and configuration
 
 ## Monitoring
@@ -330,6 +425,14 @@ The `/celery-stats` endpoint provides:
 - Worker statistics
 - Queue information
 
+### Redis Statistics
+
+The `/redis-stats` endpoint provides:
+- Redis memory usage
+- Connected clients
+- Job counts (only active tasks)
+- Keyspace statistics
+
 ### Flower Dashboard
 
 Access real-time monitoring at: http://localhost:5555
@@ -349,6 +452,7 @@ Features:
 - **Worker Recycling**: Workers restart after 1000 tasks or 200MB memory usage
 - **Concurrency Control**: Celery manages worker concurrency based on system capacity
 - **Batch Processing**: Memory-aware batch processing with dynamic concurrency
+- **Clean Redis**: No historical data accumulation - only active tasks stored
 
 ### Configuration
 
@@ -373,7 +477,7 @@ The application includes comprehensive error handling:
 - Memory management errors
 - Celery task errors
 
-All errors are logged and job status is updated accordingly.
+All errors are logged and job status is updated accordingly. Failed tasks are immediately removed from Redis.
 
 ## Security Considerations
 
@@ -384,6 +488,7 @@ All errors are logged and job status is updated accordingly.
 - Validate all input data
 - Non-root container execution
 - Network isolation with Docker
+- Redis reset endpoint requires password protection
 
 ## Troubleshooting
 
@@ -397,6 +502,7 @@ All errors are logged and job status is updated accordingly.
 6. **Celery Worker Issues**: Check worker logs and restart if needed
 7. **Gunicorn Issues**: Check Gunicorn configuration and worker processes
 8. **Port Conflicts**: Ensure ports 8001 and 6380 are available
+9. **Job Not Found**: Completed/failed jobs are removed from Redis immediately
 
 ### Logs
 
@@ -468,8 +574,14 @@ curl http://localhost:8001/memory-stats
 # Check Celery stats
 curl http://localhost:8001/celery-stats
 
+# Check Redis stats
+curl http://localhost:8001/redis-stats
+
 # Check health
 curl http://localhost:8001/health
+
+# Check running tasks
+curl http://localhost:8001/running-tasks
 
 # Monitor system
 ./deploy.sh monitor

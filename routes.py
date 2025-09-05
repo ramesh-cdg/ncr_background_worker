@@ -78,27 +78,20 @@ async def process_job(job_request: JobRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/job-status/{job_id}/{username}")
-async def get_job_status(job_id: str, username: str):
-    """Get status of a specific job by job_id and username"""
+@router.get("/job-status/{job_id}")
+async def get_job_status(job_id: str):
+    """Get status of a specific job by job_id"""
     try:
-        print(f"🔍 [API] Looking up job: {job_id} for user: {username}")
+        print(f"🔍 [API] Looking up job: {job_id}")
         
-        # Find the task for this job_id and username
+        # Find the task for this job_id
         matching_jobs = redis_manager.get_jobs_by_job_id(job_id)
         
         if not matching_jobs:
             raise HTTPException(status_code=404, detail=f"No job found with job_id: {job_id}")
         
-        # Filter by username
-        job = None
-        for j in matching_jobs:
-            if j.get("username") == username:
-                job = j
-                break
-        
-        if not job:
-            raise HTTPException(status_code=404, detail=f"No job found with job_id: {job_id} for username: {username}")
+        # Get the first matching job (should be only one since we don't keep historical data)
+        job = matching_jobs[0]
         
         # Only return if job is in progress
         in_progress_statuses = ["pending", "processing"]
@@ -109,7 +102,7 @@ async def get_job_status(job_id: str, username: str):
         
         return {
             "job_id": job_id,
-            "username": username,
+            "username": job.get("username", ""),
             "task_id": job["task_id"],
             "celery_task_id": job.get("celery_task_id", ""),
             "status": job["status"],
