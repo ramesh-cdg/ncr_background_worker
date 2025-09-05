@@ -1,9 +1,9 @@
 """
-API routes module
+API routes module - Simplified
 """
 import os
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 
@@ -23,13 +23,17 @@ router = APIRouter()
 
 
 # Batch processing models
-class BatchJobRequest:
+class BatchJobRequest(BaseModel):
     """Request model for batch job processing"""
-    def __init__(self, job_id: str, username: str, campaign: str, row_id: Optional[int] = None):
-        self.job_id = job_id
-        self.username = username
-        self.campaign = campaign
-        self.row_id = row_id
+    job_id: str
+    username: str
+    campaign: str
+    row_id: Optional[int] = None
+
+
+class RedisResetRequest(BaseModel):
+    """Request model for Redis reset"""
+    password: str
 
 
 @router.get("/")
@@ -40,12 +44,9 @@ async def root():
 
 @router.post("/process-job", response_model=JobResponse)
 async def process_job(job_request: JobRequest):
-    """Process a job using Celery - always queue the job"""
+    """Process a single job by job_id"""
     try:
-        # Always queue the job - Celery will handle memory management
-        # No need to check memory here as Celery has built-in concurrency control
-        
-        # Start Celery task first to get the actual task ID
+        # Start Celery task
         celery_result = process_job_task.delay(
             job_request.job_id,
             job_request.username,
@@ -69,7 +70,7 @@ async def process_job(job_request: JobRequest):
         return JobResponse(
             job_id=job_request.job_id,
             status="processing",
-            message="Job processing started with Celery",
+            message="Job processing started",
             timestamp=redis_manager.get_current_ny_time(),
             task_id=task_id
         )
@@ -77,20 +78,27 @@ async def process_job(job_request: JobRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/job-status-by-job-id/{job_id}")
-async def get_job_status_by_job_id(job_id: str):
-    """Get the status of a job by job ID (only returns if job is in progress)"""
+@router.get("/job-status/{job_id}/{username}")
+async def get_job_status(job_id: str, username: str):
+    """Get status of a specific job by job_id and username"""
     try:
-        print(f"🔍 [API] Looking up job by job_id: {job_id}")
+        print(f"🔍 [API] Looking up job: {job_id} for user: {username}")
         
-        # Find the single task for this job_id (no history kept)
+        # Find the task for this job_id and username
         matching_jobs = redis_manager.get_jobs_by_job_id(job_id)
         
         if not matching_jobs:
             raise HTTPException(status_code=404, detail=f"No job found with job_id: {job_id}")
         
-        # Since we only keep the latest task, there should be only one
-        job = matching_jobs[0]
+        # Filter by username
+        job = None
+        for j in matching_jobs:
+            if j.get("username") == username:
+                job = j
+                break
+        
+        if not job:
+            raise HTTPException(status_code=404, detail=f"No job found with job_id: {job_id} for username: {username}")
         
         # Only return if job is in progress
         in_progress_statuses = ["pending", "processing"]
@@ -101,12 +109,12 @@ async def get_job_status_by_job_id(job_id: str):
         
         return {
             "job_id": job_id,
+            "username": username,
             "task_id": job["task_id"],
             "celery_task_id": job.get("celery_task_id", ""),
             "status": job["status"],
             "progress": job.get("progress", {}),
             "message": job.get("message", ""),
-            "username": job.get("username", ""),
             "campaign": job.get("campaign", ""),
             "row_id": job.get("row_id", ""),
             "timestamp": job.get("timestamp", ""),
@@ -120,98 +128,179 @@ async def get_job_status_by_job_id(job_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/job-status/{task_id}", response_model=JobStatusResponse)
-async def get_job_status_endpoint(task_id: str):
-    """Get the status of a specific job by task ID (only returns if job is in progress)"""
+@router.get("/running-tasks")
+async def get_running_tasks():
+    """Get list of all running tasks"""
     try:
-        job_data = redis_manager.get_job_status(task_id)
-        if job_data:
-            # Only return if job is in progress
-            in_progress_statuses = ["pending", "processing"]
-            if job_data.get("status") not in in_progress_statuses:
-                raise HTTPException(status_code=404, detail=f"Job {task_id} is not in progress (status: {job_data.get('status')})")
-            
-            return JobStatusResponse(
-                job_id=job_data["job_id"],
-                task_id=task_id,
-                status=job_data["status"],
-                progress=job_data["progress"],
-                message=job_data["message"],
-                timestamp=datetime.fromisoformat(job_data["timestamp"])
-            )
-        else:
-            # Job not found in Redis - it's either completed or failed
-            raise HTTPException(status_code=404, detail=f"Job not found with task_id: {task_id} (may be completed or failed)")
-            
-    except HTTPException:
-        raise
+        # Get all active jobs from Redis
+        active_jobs = redis_manager.get_active_jobs()
+        
+        # Filter to only in-progress jobs
+        in_progress_jobs = [
+            job for job in active_jobs 
+            if job.get("status") in ["pending", "processing"]
+        ]
+        
+        return {
+            "running_tasks": in_progress_jobs,
+            "count": len(in_progress_jobs),
+            "timestamp": redis_manager.get_current_ny_time()
+        }
+        
     except Exception as e:
-        print(f"❌ [API] Error getting job status for task_id {task_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/job-history/{job_id}")
-async def get_job_history(job_id: str):
-    """Get current task status for a specific job_id (only returns if job is in progress)"""
+@router.post("/process-batch")
+async def process_batch_jobs_endpoint(
+    job_requests: List[BatchJobRequest], 
+    common_username: Optional[str] = None
+):
+    """Process multiple jobs in batch"""
     try:
-        print(f"🔍 [API] Getting current job status for job_id: {job_id}")
+        # Check memory availability
+        if not memory_manager.should_accept_new_job():
+            raise HTTPException(
+                status_code=503, 
+                detail="Server memory usage is high. Please try again later."
+            )
         
-        # Find the single task for this job_id (no history kept)
-        all_jobs = redis_manager.get_jobs_by_job_id(job_id)
+        # Auto-select common username if not provided (use first username)
+        if not common_username and job_requests:
+            common_username = job_requests[0].username
+            print(f"🔄 [API] Auto-selected common username: {common_username}")
         
-        if not all_jobs:
-            raise HTTPException(status_code=404, detail=f"No job found with job_id: {job_id}")
+        # Convert to batch format
+        batch_jobs = []
+        for job_req in job_requests:
+            # Use the common username for all jobs
+            batch_jobs.append({
+                "job_id": job_req.job_id,
+                "username": common_username,
+                "campaign": job_req.campaign,
+                "row_id": job_req.row_id
+            })
         
-        # Since we only keep the latest task, there should be only one
-        job = all_jobs[0]
+        # Start batch processing
+        batch_result = batch_process_jobs.delay(batch_jobs)
         
-        # Only return if job is in progress
-        in_progress_statuses = ["pending", "processing"]
-        if job.get("status") not in in_progress_statuses:
-            raise HTTPException(status_code=404, detail=f"Job {job_id} is not in progress (status: {job.get('status')})")
+        # Store batch info in Redis for tracking (using common_username as key)
+        batch_info = {
+            "batch_id": batch_result.id,
+            "total_jobs": len(job_requests),
+            "common_username": common_username,
+            "status": "processing",
+            "created_at": redis_manager.get_current_ny_time().isoformat(),
+            "job_ids": [job_req.job_id for job_req in job_requests]
+        }
         
-        print(f"✅ [API] Found in-progress job for job_id {job_id}")
+        # Store batch info in Redis with username as key
+        redis_manager.client.hset(f"batch:{common_username}", mapping={
+            "batch_id": batch_result.id,
+            "total_jobs": str(len(job_requests)),
+            "common_username": common_username or "",
+            "status": "processing",
+            "created_at": batch_info["created_at"],
+            "job_ids": ",".join(batch_info["job_ids"])
+        })
+        redis_manager.client.expire(f"batch:{common_username}", 86400)  # Expire in 24 hours
         
         return {
-            "job_id": job_id,
-            "total_tasks": 1,
-            "current_status": job["status"],
-            "latest_task_id": job["task_id"],
-            "latest_message": job.get("message", ""),
-            "latest_timestamp": job.get("timestamp", ""),
-            "username": job.get("username", ""),
-            "campaign": job.get("campaign", ""),
-            "row_id": job.get("row_id", ""),
-            "task_history": [
-                {
-                    "task_id": job["task_id"],
-                    "celery_task_id": job.get("celery_task_id", ""),
-                    "status": job["status"],
-                    "message": job.get("message", ""),
-                    "timestamp": job.get("timestamp", ""),
-                    "progress": job.get("progress", {}),
-                    "logs": job.get("logs", [])
-                }
-            ],
-            "status_summary": {
-                "pending": 1 if job["status"] == "pending" else 0,
-                "processing": 1 if job["status"] == "processing" else 0,
-                "completed": 1 if job["status"] == "completed" else 0,
-                "failed": 1 if job["status"] == "failed" else 0
-            },
-            "note": "Only in-progress tasks are returned - completed/failed tasks return 404"
+            "batch_id": batch_result.id,
+            "total_jobs": len(job_requests),
+            "common_username": common_username,
+            "status": "processing",
+            "message": f"Batch processing started for {len(job_requests)} jobs with username '{common_username}'",
+            "timestamp": redis_manager.get_current_ny_time()
         }
-            
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/batch-status/{username}")
+async def get_batch_status(username: str):
+    """Get batch processing status by username"""
+    try:
+        print(f"🔍 [API] Getting batch status for username: {username}")
+        
+        # Get batch info from Redis
+        batch_data = redis_manager.client.hgetall(f"batch:{username}")
+        if not batch_data:
+            raise HTTPException(status_code=404, detail=f"No batch found for username: {username}")
+        
+        batch_id = batch_data.get("batch_id")
+        if not batch_id:
+            raise HTTPException(status_code=404, detail=f"Invalid batch data for username: {username}")
+        
+        # Get current batch status from Celery
+        from celery.result import AsyncResult
+        result = AsyncResult(batch_id, app=celery_app)
+        
+        if result.ready():
+            if result.successful():
+                batch_status = "completed"
+                batch_result = result.result
+            else:
+                batch_status = "failed"
+                batch_result = str(result.result)
+        else:
+            batch_status = "processing"
+            batch_result = None
+        
+        # Get individual job results
+        individual_results = []
+        if batch_result and "job_results" in batch_result:
+            for job in batch_result["job_results"]:
+                task_id = job.get("task_id")
+                if task_id:
+                    try:
+                        task_result = AsyncResult(task_id, app=celery_app)
+                        if task_result.ready():
+                            individual_results.append({
+                                "job_id": job.get("job_id"),
+                                "task_id": task_id,
+                                "status": "completed" if task_result.successful() else "failed",
+                                "result": task_result.result if task_result.successful() else str(task_result.result)
+                            })
+                        else:
+                            individual_results.append({
+                                "job_id": job.get("job_id"),
+                                "task_id": task_id,
+                                "status": "processing",
+                                "result": None
+                            })
+                    except Exception as e:
+                        individual_results.append({
+                            "job_id": job.get("job_id"),
+                            "task_id": task_id,
+                            "status": "error",
+                            "result": str(e)
+                        })
+        
+        return {
+            "username": username,
+            "batch_id": batch_id,
+            "status": batch_status,
+            "total_jobs": int(batch_data.get("total_jobs", 0)),
+            "created_at": batch_data.get("created_at", ""),
+            "individual_results": individual_results,
+            "completed_jobs": len([r for r in individual_results if r["status"] == "completed"]),
+            "failed_jobs": len([r for r in individual_results if r["status"] == "failed"]),
+            "processing_jobs": len([r for r in individual_results if r["status"] == "processing"]),
+            "timestamp": redis_manager.get_current_ny_time()
+        }
+        
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ [API] Error getting job status for {job_id}: {e}")
+        print(f"❌ [API] Error getting batch status for username {username}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/health", response_model=HealthResponse)
 async def health_check():
-    """Health check endpoint with Celery integration"""
+    """Health check endpoint"""
     try:
         # Get health status from Celery task
         health_result = health_check_task.delay()
@@ -243,335 +332,6 @@ async def health_check():
             database=db_status,
             timestamp=redis_manager.get_current_ny_time()
         )
-
-
-@router.get("/jobs/active", response_model=ActiveJobsResponse)
-async def get_active_jobs(username: Optional[str] = None, campaign: Optional[str] = None):
-    """Get active jobs from Redis with optional filtering by username and/or campaign"""
-    try:
-        active_jobs = redis_manager.get_active_jobs(username=username, campaign=campaign)
-        return ActiveJobsResponse(active_jobs=active_jobs, count=len(active_jobs))
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/jobs")
-async def get_jobs(
-    username: Optional[str] = None, 
-    campaign: Optional[str] = None,
-    status: Optional[str] = None,
-    limit: Optional[int] = 100
-):
-    """Get in-progress jobs from Redis with filtering options (only returns active jobs)"""
-    try:
-        # Only allow in-progress statuses
-        in_progress_statuses = ["pending", "processing"]
-        if status and status not in in_progress_statuses:
-            return {
-                "jobs": [],
-                "count": 0,
-                "filters": {
-                    "username": username,
-                    "campaign": campaign,
-                    "status": status,
-                    "limit": limit
-                },
-                "message": f"Only in-progress statuses are supported: {in_progress_statuses}",
-                "timestamp": redis_manager.get_current_ny_time()
-            }
-        
-        jobs = redis_manager.get_jobs(
-            username=username, 
-            campaign=campaign, 
-            status=status, 
-            limit=limit
-        )
-        
-        # Filter to only in-progress jobs
-        in_progress_jobs = [
-            job for job in jobs 
-            if job.get("status") in in_progress_statuses
-        ]
-        
-        return {
-            "jobs": in_progress_jobs,
-            "count": len(in_progress_jobs),
-            "filters": {
-                "username": username,
-                "campaign": campaign,
-                "status": status,
-                "limit": limit
-            },
-            "note": "Only in-progress jobs are returned",
-            "timestamp": redis_manager.get_current_ny_time()
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/process-batch")
-async def process_batch_jobs(
-    job_requests: List[JobRequest], 
-    common_username: Optional[str] = None
-):
-    """Process multiple jobs in batch with memory management and automatic common username"""
-    try:
-        # Check memory availability
-        if not memory_manager.should_accept_new_job():
-            raise HTTPException(
-                status_code=503, 
-                detail="Server memory usage is high. Please try again later."
-            )
-        
-        # Auto-select common username if not provided
-        if not common_username and job_requests:
-            # Use the first username as the common username
-            common_username = job_requests[0].username
-            print(f"🔄 [API] Auto-selected common username: {common_username}")
-        
-        # Convert to batch format
-        batch_jobs = []
-        for job_req in job_requests:
-            # Use the common username for all jobs
-            batch_jobs.append({
-                "job_id": job_req.job_id,
-                "username": common_username,
-                "campaign": job_req.campaign,
-                "row_id": job_req.row_id
-            })
-        
-        # Start batch processing
-        batch_result = batch_process_jobs.delay(batch_jobs)
-        
-        # Store batch info in Redis for tracking
-        batch_info = {
-            "batch_id": batch_result.id,
-            "total_jobs": len(job_requests),
-            "common_username": common_username,
-            "status": "processing",
-            "created_at": redis_manager.get_current_ny_time().isoformat(),
-            "job_ids": [job_req.job_id for job_req in job_requests]
-        }
-        
-        # Store batch info in Redis
-        redis_manager.client.hset(f"batch:{batch_result.id}", mapping={
-            "batch_id": batch_result.id,
-            "total_jobs": str(len(job_requests)),
-            "common_username": common_username or "",
-            "status": "processing",
-            "created_at": batch_info["created_at"],
-            "job_ids": ",".join(batch_info["job_ids"])
-        })
-        redis_manager.client.expire(f"batch:{batch_result.id}", 86400)  # Expire in 24 hours
-        
-        return {
-            "batch_id": batch_result.id,
-            "total_jobs": len(job_requests),
-            "common_username": common_username,
-            "status": "processing",
-            "message": f"Batch processing started for {len(job_requests)} jobs with common username '{common_username}'",
-            "timestamp": redis_manager.get_current_ny_time()
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/batch-status/{batch_id}")
-async def get_batch_status(batch_id: str):
-    """Get batch processing status"""
-    try:
-        from celery.result import AsyncResult
-        result = AsyncResult(batch_id, app=celery_app)
-        
-        # Check if batch exists in Redis
-        batch_info = redis_manager.client.hgetall(f"batch:{batch_id}")
-        if not batch_info:
-            raise HTTPException(status_code=404, detail=f"Batch not found with batch_id: {batch_id}")
-        
-        if result.ready():
-            if result.successful():
-                batch_result = result.result
-                
-                # Get individual task results
-                individual_results = []
-                if "job_results" in batch_result:
-                    for job in batch_result["job_results"]:
-                        task_id = job.get("task_id")
-                        job_id = job.get("job_id")
-                        try:
-                            task_result = AsyncResult(task_id, app=celery_app)
-                            if task_result.ready():
-                                individual_results.append({
-                                    "job_id": job_id,
-                                    "task_id": task_id,
-                                    "status": "completed" if task_result.successful() else "failed",
-                                    "result": task_result.result if task_result.successful() else str(task_result.result)
-                                })
-                            else:
-                                individual_results.append({
-                                    "job_id": job_id,
-                                    "task_id": task_id,
-                                    "status": "processing",
-                                    "result": None
-                                })
-                        except Exception as e:
-                            individual_results.append({
-                                "job_id": job_id,
-                                "task_id": task_id,
-                                "status": "error",
-                                "result": str(e)
-                            })
-                
-                return {
-                    "batch_id": batch_id,
-                    "status": "completed",
-                    "batch_result": batch_result,
-                    "individual_results": individual_results,
-                    "completed_tasks": len([r for r in individual_results if r["status"] == "completed"]),
-                    "failed_tasks": len([r for r in individual_results if r["status"] == "failed"]),
-                    "processing_tasks": len([r for r in individual_results if r["status"] == "processing"]),
-                    "timestamp": redis_manager.get_current_ny_time()
-                }
-            else:
-                return {
-                    "batch_id": batch_id,
-                    "status": "failed",
-                    "error": str(result.result),
-                    "timestamp": redis_manager.get_current_ny_time()
-                }
-        else:
-            return {
-                "batch_id": batch_id,
-                "status": "processing",
-                "message": "Batch is still being processed",
-                "timestamp": redis_manager.get_current_ny_time()
-            }
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"❌ [API] Error getting batch status for {batch_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/batch-status-by-username/{username}")
-async def get_batch_status_by_username(username: str):
-    """Get batch processing status by username"""
-    try:
-        print(f"🔍 [API] Getting batch status for username: {username}")
-        
-        # Find all batches for this username
-        batches = redis_manager.get_batches_by_username(username)
-        
-        if not batches:
-            return {
-                "username": username,
-                "total_batches": 0,
-                "batches": [],
-                "summary": {
-                    "processing": 0,
-                    "completed": 0,
-                    "failed": 0
-                },
-                "message": f"No batches found for username: {username}",
-                "timestamp": redis_manager.get_current_ny_time()
-            }
-        
-        # Get detailed status for each batch
-        batch_details = []
-        for batch in batches:
-            batch_id = batch["batch_id"]
-            
-            # Get current batch status from Celery
-            try:
-                from celery.result import AsyncResult
-                result = AsyncResult(batch_id, app=celery_app)
-                
-                if result.ready():
-                    if result.successful():
-                        batch_status = "completed"
-                        batch_result = result.result
-                    else:
-                        batch_status = "failed"
-                        batch_result = str(result.result)
-                else:
-                    batch_status = "processing"
-                    batch_result = None
-                
-                # Get individual job results
-                individual_results = []
-                if batch_result and "job_results" in batch_result:
-                    for job in batch_result["job_results"]:
-                        task_id = job.get("task_id")
-                        if task_id:
-                            try:
-                                task_result = AsyncResult(task_id, app=celery_app)
-                                if task_result.ready():
-                                    individual_results.append({
-                                        "job_id": job.get("job_id"),
-                                        "task_id": task_id,
-                                        "status": "completed" if task_result.successful() else "failed",
-                                        "result": task_result.result if task_result.successful() else str(task_result.result)
-                                    })
-                                else:
-                                    individual_results.append({
-                                        "job_id": job.get("job_id"),
-                                        "task_id": task_id,
-                                        "status": "processing",
-                                        "result": None
-                                    })
-                            except Exception as e:
-                                individual_results.append({
-                                    "job_id": job.get("job_id"),
-                                    "task_id": task_id,
-                                    "status": "error",
-                                    "result": str(e)
-                                })
-                
-                batch_details.append({
-                    "batch_id": batch_id,
-                    "status": batch_status,
-                    "total_jobs": batch.get("total_jobs", 0),
-                    "created_at": batch.get("created_at", ""),
-                    "individual_results": individual_results,
-                    "completed_jobs": len([r for r in individual_results if r["status"] == "completed"]),
-                    "failed_jobs": len([r for r in individual_results if r["status"] == "failed"]),
-                    "processing_jobs": len([r for r in individual_results if r["status"] == "processing"])
-                })
-                
-            except Exception as e:
-                print(f"❌ [API] Error getting batch status for {batch_id}: {e}")
-                batch_details.append({
-                    "batch_id": batch_id,
-                    "status": "error",
-                    "total_jobs": batch.get("total_jobs", 0),
-                    "created_at": batch.get("created_at", ""),
-                    "error": str(e)
-                })
-        
-        # Calculate summary
-        summary = {
-            "processing": len([b for b in batch_details if b["status"] == "processing"]),
-            "completed": len([b for b in batch_details if b["status"] == "completed"]),
-            "failed": len([b for b in batch_details if b["status"] == "failed"])
-        }
-        
-        print(f"✅ [API] Found {len(batches)} batches for username {username}")
-        
-        return {
-            "username": username,
-            "total_batches": len(batches),
-            "batches": batch_details,
-            "summary": summary,
-            "timestamp": redis_manager.get_current_ny_time()
-        }
-        
-    except Exception as e:
-        print(f"❌ [API] Error getting batch status for username {username}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/memory-stats")
@@ -618,9 +378,6 @@ async def get_celery_stats():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# cleanup-failed-jobs endpoint removed - no historical data is kept in Redis
-
-
 @router.get("/redis-stats")
 async def get_redis_stats():
     """Get Redis statistics and job counts"""
@@ -659,12 +416,6 @@ async def get_redis_stats():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-# Redis reset request model
-class RedisResetRequest(BaseModel):
-    """Request model for Redis reset"""
-    password: str
 
 
 @router.post("/redis/reset")

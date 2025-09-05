@@ -283,36 +283,7 @@ class RedisManager:
         
         return jobs
     
-    def get_batches_by_username(self, username: str) -> list:
-        """Get all batches for a specific username"""
-        batches = []
-        try:
-            print(f"🔍 [REDIS] Getting batches by username: {username}")
-            
-            for key in self.client.scan_iter("batch:*"):
-                batch_id = key.split(":")[1]
-                batch_data = self.client.hgetall(key)
-                
-                if batch_data:
-                    batch_username = batch_data.get("common_username", "")
-                    
-                    # Check if this batch belongs to the username
-                    if batch_username and username.lower() in batch_username.lower():
-                        batches.append({
-                            "batch_id": batch_id,
-                            "total_jobs": int(batch_data.get("total_jobs", 0)),
-                            "common_username": batch_username,
-                            "status": batch_data.get("status", "unknown"),
-                            "created_at": batch_data.get("created_at", ""),
-                            "job_ids": batch_data.get("job_ids", "").split(",") if batch_data.get("job_ids") else []
-                        })
-            
-            print(f"   ✅ Found {len(batches)} batches for username: {username}")
-            
-        except Exception as e:
-            print(f"❌ [REDIS] Error getting batches by username {username}: {e}")
-        
-        return batches
+    # get_batches_by_username function removed - no batch data stored in Redis
     
     def get_job_by_celery_task_id(self, celery_task_id: str) -> Optional[Dict[str, Any]]:
         """Get job data by Celery task ID"""
