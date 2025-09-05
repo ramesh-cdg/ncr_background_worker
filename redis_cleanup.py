@@ -29,20 +29,14 @@ def show_redis_status():
             "pending": 0,
             "processing": 0,
             "completed": 0,
-            "failed": 0,
-            "validation_passed": 0,
-            "validation_failed": 0,
-            "uploading": 0
+            "failed": 0
         }
         
         jobs_by_status = {
             "pending": [],
             "processing": [],
             "completed": [],
-            "failed": [],
-            "validation_passed": [],
-            "validation_failed": [],
-            "uploading": []
+            "failed": []
         }
         
         print("📊 JOB COUNTS BY STATUS:")

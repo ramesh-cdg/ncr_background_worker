@@ -5,6 +5,7 @@ import os
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from typing import Optional, List, Dict, Any
+from pydantic import BaseModel
 
 from models import (
     JobRequest, JobResponse, JobStatusResponse, 
@@ -92,7 +93,7 @@ async def get_job_status_by_job_id(job_id: str):
         job = matching_jobs[0]
         
         # Only return if job is in progress
-        in_progress_statuses = ["pending", "processing", "uploading", "validation_passed"]
+        in_progress_statuses = ["pending", "processing"]
         if job.get("status") not in in_progress_statuses:
             raise HTTPException(status_code=404, detail=f"Job {job_id} is not in progress (status: {job.get('status')})")
         
@@ -126,7 +127,7 @@ async def get_job_status_endpoint(task_id: str):
         job_data = redis_manager.get_job_status(task_id)
         if job_data:
             # Only return if job is in progress
-            in_progress_statuses = ["pending", "processing", "uploading", "validation_passed"]
+            in_progress_statuses = ["pending", "processing"]
             if job_data.get("status") not in in_progress_statuses:
                 raise HTTPException(status_code=404, detail=f"Job {task_id} is not in progress (status: {job_data.get('status')})")
             
@@ -165,7 +166,7 @@ async def get_job_history(job_id: str):
         job = all_jobs[0]
         
         # Only return if job is in progress
-        in_progress_statuses = ["pending", "processing", "uploading", "validation_passed"]
+        in_progress_statuses = ["pending", "processing"]
         if job.get("status") not in in_progress_statuses:
             raise HTTPException(status_code=404, detail=f"Job {job_id} is not in progress (status: {job.get('status')})")
         
@@ -195,8 +196,8 @@ async def get_job_history(job_id: str):
             "status_summary": {
                 "pending": 1 if job["status"] == "pending" else 0,
                 "processing": 1 if job["status"] == "processing" else 0,
-                "uploading": 1 if job["status"] == "uploading" else 0,
-                "validation_passed": 1 if job["status"] == "validation_passed" else 0
+                "completed": 1 if job["status"] == "completed" else 0,
+                "failed": 1 if job["status"] == "failed" else 0
             },
             "note": "Only in-progress tasks are returned - completed/failed tasks return 404"
         }
@@ -265,7 +266,7 @@ async def get_jobs(
     """Get in-progress jobs from Redis with filtering options (only returns active jobs)"""
     try:
         # Only allow in-progress statuses
-        in_progress_statuses = ["pending", "processing", "uploading", "validation_passed"]
+        in_progress_statuses = ["pending", "processing"]
         if status and status not in in_progress_statuses:
             return {
                 "jobs": [],
@@ -617,24 +618,7 @@ async def get_celery_stats():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/cleanup-failed-jobs")
-async def cleanup_failed_jobs():
-    """Manually trigger cleanup of failed jobs"""
-    try:
-        from tasks import cleanup_old_jobs
-        
-        # Run cleanup task
-        result = cleanup_old_jobs.delay()
-        cleanup_result = result.get(timeout=30)
-        
-        return {
-            "status": "success",
-            "message": "Cleanup task completed",
-            "result": cleanup_result,
-            "timestamp": redis_manager.get_current_ny_time()
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# cleanup-failed-jobs endpoint removed - no historical data is kept in Redis
 
 
 @router.get("/redis-stats")
@@ -650,10 +634,7 @@ async def get_redis_stats():
             "pending": 0,
             "processing": 0,
             "completed": 0,
-            "failed": 0,
-            "validation_passed": 0,
-            "validation_failed": 0,
-            "uploading": 0
+            "failed": 0
         }
         
         for key in redis_manager.client.scan_iter("job:*"):
@@ -677,4 +658,45 @@ async def get_redis_stats():
             "timestamp": redis_manager.get_current_ny_time()
         }
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Redis reset request model
+class RedisResetRequest(BaseModel):
+    """Request model for Redis reset"""
+    password: str
+
+
+@router.post("/redis/reset")
+async def reset_redis_data(reset_request: RedisResetRequest):
+    """Reset all Redis data with password protection"""
+    try:
+        # Check password
+        if reset_request.password != "reset@2025":
+            raise HTTPException(status_code=401, detail="Invalid password")
+        
+        print("🗑️ [API] Redis reset requested - clearing all data...")
+        
+        # Get all Redis keys
+        all_keys = list(redis_manager.client.scan_iter("*"))
+        keys_count = len(all_keys)
+        
+        if keys_count > 0:
+            # Delete all keys
+            redis_manager.client.delete(*all_keys)
+            print(f"✅ [API] Deleted {keys_count} Redis keys")
+        else:
+            print("ℹ️ [API] No Redis keys found to delete")
+        
+        return {
+            "status": "success",
+            "message": f"Redis data reset successfully - deleted {keys_count} keys",
+            "deleted_keys": keys_count,
+            "timestamp": redis_manager.get_current_ny_time()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ [API] Error resetting Redis data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
