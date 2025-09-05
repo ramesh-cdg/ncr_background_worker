@@ -93,10 +93,10 @@ async def get_job_status(job_id: str):
         # Get the first matching job (should be only one since we don't keep historical data)
         job = matching_jobs[0]
         
-        # Only return if job is in progress
-        in_progress_statuses = ["pending", "processing"]
+        # Only return if job is in progress or completed
+        in_progress_statuses = ["pending", "processing", "completed"]
         if job.get("status") not in in_progress_statuses:
-            raise HTTPException(status_code=404, detail=f"Job {job_id} is not in progress (status: {job.get('status')})")
+            raise HTTPException(status_code=404, detail=f"Job {job_id} is not found (status: {job.get('status')})")
         
         print(f"✅ [API] Found in-progress job for job_id {job_id}")
         
@@ -128,10 +128,10 @@ async def get_running_tasks():
         # Get all active jobs from Redis
         active_jobs = redis_manager.get_active_jobs()
         
-        # Filter to only in-progress jobs
+        # Filter to only in-progress and completed jobs
         in_progress_jobs = [
             job for job in active_jobs 
-            if job.get("status") in ["pending", "processing"]
+            if job.get("status") in ["pending", "processing", "completed"]
         ]
         
         return {

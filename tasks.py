@@ -268,14 +268,14 @@ def process_job_task(
             FileProcessor.cleanup_files(all_local_files, zip_path, download_dir)
             print(f"   ✅ Cleanup completed")
             
-            # Task completed successfully - remove from Redis
-            redis_manager.client.delete(f"job:{task_id}")
-            print(f"🎉 [TASK {task_id}] Job completed successfully and removed from Redis!")
-            
-            # Return validation result for reference, but task status is always completed
+            # Task completed successfully - update status to completed
             if validation_result:
+                redis_manager.update_job_status(task_id, JobStatus.COMPLETED, "Job completed successfully - validation passed")
+                print(f"🎉 [TASK {task_id}] Job completed successfully with validation passed!")
                 return {"status": "completed", "message": "Job completed successfully", "validation_result": "passed"}
             else:
+                redis_manager.update_job_status(task_id, JobStatus.COMPLETED, "Job completed successfully - validation failed, files not uploaded")
+                print(f"🎉 [TASK {task_id}] Job completed successfully with validation failed!")
                 return {"status": "completed", "message": "Job completed successfully - validation failed, files not uploaded", "validation_result": "failed"}
         
         finally:

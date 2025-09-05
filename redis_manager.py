@@ -164,7 +164,7 @@ class RedisManager:
             for key in self.client.scan_iter("job:*"):
                 task_id = key.split(":")[1]
                 job_data = self.get_job_status(task_id)
-                if job_data and job_data["status"] not in [JobStatus.COMPLETED, JobStatus.FAILED]:
+                if job_data and job_data["status"] not in [JobStatus.FAILED]:
                     # Apply filters
                     job_username = job_data.get("username", "")
                     job_campaign = job_data.get("campaign", "")
