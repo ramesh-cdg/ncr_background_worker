@@ -10,7 +10,7 @@ services:
       - "6380:6379"  # External port 6380, internal port 6379
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --maxmemory 4gb --maxmemory-policy allkeys-lru
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -28,7 +28,7 @@ services:
     environment:
       - REDIS_HOST=localhost
       - REDIS_PORT=6380  # External Redis port
-      - GUNICORN_WORKERS=4
+      - GUNICORN_WORKERS=8
       - GUNICORN_WORKER_CLASS=uvicorn.workers.UvicornWorker
       - GUNICORN_BIND=0.0.0.0:8001
     env_file:
@@ -43,16 +43,16 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
+          memory: 4G
         reservations:
-          memory: 512M
+          memory: 2G
 
   # Celery Worker
   worker:
     build: 
       context: .
       dockerfile: Dockerfile
-    command: python start_worker.py worker --concurrency 4
+    command: python start_worker.py worker --concurrency 8
     network_mode: "host"
     environment:
       - REDIS_HOST=localhost
@@ -63,9 +63,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
+          memory: 8G
         reservations:
-          memory: 512M
+          memory: 4G
     healthcheck:
       test: ["CMD", "celery", "-A", "celery_app", "inspect", "ping"]
       interval: 30s

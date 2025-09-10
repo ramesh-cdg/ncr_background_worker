@@ -41,7 +41,7 @@ class FileProcessor:
         print(f"   - Filename: {filename}")
         print(f"   - Local path: {local_path}")
         
-        response = requests.get(url, stream=True)
+        response = requests.get(url, stream=False)
         print(f"   - Response status: {response.status_code}")
         print(f"   - Response headers: {dict(response.headers)}")
         
@@ -52,11 +52,8 @@ class FileProcessor:
             raise Exception(error_msg)
         
         with open(local_path, "wb") as f:
-            total_size = 0
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-                    total_size += len(chunk)
+            f.write(response.content)
+            total_size = len(response.content)
         
         print(f"   ✅ Downloaded successfully: {total_size} bytes")
         return local_path
