@@ -137,8 +137,8 @@ class MemoryManager:
         memory_stats = MemoryManager.get_memory_usage()
         available_memory_mb = memory_stats['system_memory_available_mb']
         
-        # Estimate 200MB per job
-        estimated_memory_per_job = 200
+        # Estimate 500MB per job for 54GB system
+        estimated_memory_per_job = 500
         max_concurrent_jobs = int(available_memory_mb / estimated_memory_per_job)
         
         # Ensure minimum of 1 and maximum of configured concurrency
@@ -153,8 +153,8 @@ class MemoryManager:
         memory_stats = MemoryManager.get_memory_usage()
         process_memory_mb = memory_stats['process_memory_mb']
         
-        # Don't accept new jobs if process memory exceeds 500MB
-        return process_memory_mb < 500
+        # Don't accept new jobs if process memory exceeds 2GB for 54GB system
+        return process_memory_mb < 2000
 
 
 # Global memory manager instance

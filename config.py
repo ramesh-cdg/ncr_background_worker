@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     api_port: int = 8001
     
     # Gunicorn Configuration
-    gunicorn_workers: int = 4
+    gunicorn_workers: int = 8
     gunicorn_worker_class: str = "uvicorn.workers.UvicornWorker"
     gunicorn_timeout: int = 120
     gunicorn_keepalive: int = 2
@@ -72,10 +72,10 @@ class Settings(BaseSettings):
     celery_enable_utc: bool = True
     
     # Worker Configuration
-    celery_worker_concurrency: int = 4
+    celery_worker_concurrency: int = 8
     celery_worker_prefetch_multiplier: int = 1  # Only prefetch 1 task per worker
     celery_worker_max_tasks_per_child: int = 1000
-    celery_worker_max_memory_per_child: int = 200000  # 200MB in KB
+    celery_worker_max_memory_per_child: int = 2000000  # 2GB in KB
     
     # Task Configuration
     celery_task_soft_time_limit: int = 3600  # 1 hour
@@ -84,11 +84,11 @@ class Settings(BaseSettings):
     celery_worker_disable_rate_limits: bool = True
     
     # Memory Management
-    max_memory_usage_percent: int = 80  # Max 80% of available memory
+    max_memory_usage_percent: int = 85  # Max 85% of available memory for 54GB system
     memory_check_interval: int = 30  # Check memory every 30 seconds
     
     # Batch Processing
-    batch_size: int = 5  # Process up to 5 jobs in parallel
+    batch_size: int = 10  # Process up to 10 jobs in parallel for 54GB system
     batch_timeout: int = 300  # 5 minutes timeout for batch processing
     
     class Config:
