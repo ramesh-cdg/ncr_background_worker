@@ -15,6 +15,10 @@ from redis_manager import redis_manager
 from file_processor import FileProcessor
 from validation_service import ValidationService
 from models import JobStatus
+import zipfile
+import tempfile
+import shutil
+from botocore.exceptions import ClientError
 from config import settings
 
 
@@ -437,3 +441,249 @@ def health_check_task() -> Dict[str, Any]:
         
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+@celery_app.task(bind=True, name='tasks.process_file_upload_task', autoretry_for=(Exception,), retry_kwargs={'max_retries': 2, 'countdown': 60})
+def process_file_upload_task(
+    self,
+    job_id: str,
+    row_id: Optional[int] = None,
+    delivery_file_path: Optional[str] = None,
+    usdz_file_path: Optional[str] = None,
+    glb_file_path: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Process file upload task - handles delivery files, USDZ files, and GLB files
+    """
+    task_id = self.request.id
+    
+    try:
+        # Update status to processing
+        redis_manager.update_job_status(task_id, JobStatus.FILE_UPLOAD_PROCESSING, "Initializing file upload processing")
+        
+        # Get job details from database
+        print(f"🔍 [UPLOAD TASK {task_id}] Getting job details for job_id: {job_id}")
+        conn = DatabaseManager.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("SELECT sku_id, campaign, job_status FROM job_details WHERE job_id = %s", (job_id,))
+            job_details = cursor.fetchone()
+            
+            if not job_details:
+                raise Exception(f"Job not found: {job_id}")
+            
+            # Extract job details
+            sku_id = job_details[0]
+            campaign = job_details[1]
+            job_status = job_details[2]
+            
+            print(f"📊 [UPLOAD TASK {task_id}] Job details:")
+            print(f"   - Job ID: {job_id}")
+            print(f"   - SKU ID: {sku_id}")
+            print(f"   - Campaign: {campaign}")
+            print(f"   - Job Status: {job_status}")
+            
+        finally:
+            cursor.close()
+            conn.close()
+        
+        # Check if job is already approved
+        if job_status in ['IAPPROVED', 'EAPPROVED']:
+            print(f"⚠️ [UPLOAD TASK {task_id}] Job already approved: {job_status}")
+            redis_manager.update_job_status(task_id, JobStatus.FILE_UPLOAD_COMPLETED, f"Job already approved: {job_status}")
+            return {"status": "completed", "message": f"Job already approved: {job_status}", "upload_status": "already"}
+        
+        # Get current upload count
+        conn = DatabaseManager.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("SELECT COUNT(*) FROM file_upload_reports WHERE job_id = %s", (job_id,))
+            upload_count = cursor.fetchone()[0] + 1
+            print(f"📊 [UPLOAD TASK {task_id}] Upload count: {upload_count}")
+        finally:
+            cursor.close()
+            conn.close()
+        
+        # Initialize file validation flags
+        deliverable_validation = "1"
+        usdz_validation = "1"
+        glb_validation = "1"
+        
+        # Initialize file paths
+        usdz_path = ""
+        glb_path = ""
+        
+        # Get current datetime
+        current_datetime = redis_manager.get_current_ny_time_str()
+        
+        # Initialize S3 client (assuming FileProcessor has S3 functionality)
+        # We'll need to add S3 client initialization here
+        import boto3
+        s3_client = boto3.client(
+            's3',
+            aws_access_key_id=settings.wasabi_access_key,
+            aws_secret_access_key=settings.wasabi_secret_key,
+            endpoint_url=settings.wasabi_endpoint,
+            region_name=settings.wasabi_region
+        )
+        
+        # Process delivery file (ZIP)
+        if delivery_file_path and os.path.exists(delivery_file_path):
+            print(f"📦 [UPLOAD TASK {task_id}] Processing delivery file: {delivery_file_path}")
+            redis_manager.update_job_status(task_id, JobStatus.FILE_UPLOAD_PROCESSING, "Processing delivery ZIP file")
+            
+            try:
+                # Extract ZIP file
+                extract_path = tempfile.mkdtemp(prefix=f"delivery_{job_id}_")
+                print(f"   - Extract path: {extract_path}")
+                
+                with zipfile.ZipFile(delivery_file_path, 'r') as zip_ref:
+                    zip_ref.extractall(extract_path)
+                
+                # Process extracted files
+                upload_success = True
+                for root, dirs, files in os.walk(extract_path):
+                    for file in files:
+                        local_file_path = os.path.join(root, file)
+                        relative_path = os.path.relpath(local_file_path, extract_path)
+                        
+                        # Determine S3 key based on file extension
+                        extension = os.path.splitext(file)[1].lower()
+                        if extension == '.glb':
+                            if not glb_path:
+                                glb_path = f"jobs/{job_id}/GLB_files/mesh.glb"
+                                s3_key = glb_path
+                            else:
+                                s3_key = f"jobs/{job_id}/Delivery_files/{relative_path}"
+                        elif extension == '.usdz':
+                            if not usdz_path:
+                                usdz_path = f"jobs/{job_id}/usdz_files/mesh.usdz"
+                                s3_key = usdz_path
+                            else:
+                                s3_key = f"jobs/{job_id}/Delivery_files/{relative_path}"
+                        else:
+                            s3_key = f"jobs/{job_id}/Delivery_files/{relative_path}"
+                        
+                        # Upload to S3
+                        try:
+                            s3_client.upload_file(
+                                local_file_path,
+                                settings.bucket_name,
+                                s3_key,
+                                ExtraArgs={'ACL': 'private'}
+                            )
+                            print(f"   ✅ Uploaded: {s3_key}")
+                            
+                            # Update job_files table
+                            DatabaseManager.update_job_files_table(job_id, s3_key, current_datetime)
+                            
+                        except ClientError as e:
+                            print(f"   ❌ S3 upload failed: {e}")
+                            upload_success = False
+                
+                deliverable_validation = "1" if upload_success else "0"
+                
+                # Clean up extracted files
+                shutil.rmtree(extract_path)
+                
+            except Exception as e:
+                print(f"❌ [UPLOAD TASK {task_id}] Delivery file processing failed: {e}")
+                deliverable_validation = "0"
+        
+        # Process USDZ file
+        if usdz_file_path and os.path.exists(usdz_file_path):
+            print(f"📱 [UPLOAD TASK {task_id}] Processing USDZ file: {usdz_file_path}")
+            redis_manager.update_job_status(task_id, JobStatus.FILE_UPLOAD_PROCESSING, "Processing USDZ file")
+            
+            try:
+                s3_key_usdz = f"jobs/{job_id}/usdz_files/mesh.usdz"
+                
+                s3_client.upload_file(
+                    usdz_file_path,
+                    settings.bucket_name,
+                    s3_key_usdz,
+                    ExtraArgs={'ACL': 'private'}
+                )
+                
+                usdz_path = s3_key_usdz
+                usdz_validation = "1"
+                print(f"   ✅ USDZ uploaded: {s3_key_usdz}")
+                
+                # Update job_files table
+                DatabaseManager.update_job_files_table(job_id, usdz_path, current_datetime)
+                
+            except Exception as e:
+                print(f"   ❌ USDZ upload failed: {e}")
+                usdz_validation = "0"
+        
+        # Process GLB file
+        if glb_file_path and os.path.exists(glb_file_path):
+            print(f"🎮 [UPLOAD TASK {task_id}] Processing GLB file: {glb_file_path}")
+            redis_manager.update_job_status(task_id, JobStatus.FILE_UPLOAD_PROCESSING, "Processing GLB file")
+            
+            try:
+                s3_key_glb = f"jobs/{job_id}/GLB_files/mesh.glb"
+                
+                s3_client.upload_file(
+                    glb_file_path,
+                    settings.bucket_name,
+                    s3_key_glb,
+                    ExtraArgs={'ACL': 'private'}
+                )
+                
+                glb_path = s3_key_glb
+                glb_validation = "1"
+                print(f"   ✅ GLB uploaded: {s3_key_glb}")
+                
+                # Update job_files table
+                DatabaseManager.update_job_files_table(job_id, glb_path, current_datetime)
+                
+            except Exception as e:
+                print(f"   ❌ GLB upload failed: {e}")
+                glb_validation = "0"
+        
+        # Check if all uploads were successful
+        if deliverable_validation == '1' and usdz_validation == "1" and glb_validation == "1":
+            print(f"✅ [UPLOAD TASK {task_id}] All files uploaded successfully")
+            redis_manager.update_job_status(task_id, JobStatus.FILE_UPLOAD_PROCESSING, "Updating database with upload results")
+            
+            # Update database with successful upload
+            DatabaseManager.update_job_details_for_file_upload(
+                job_id, sku_id, upload_count, campaign, usdz_path, glb_path, 
+                current_datetime, row_id
+            )
+            
+            redis_manager.update_job_status(task_id, JobStatus.FILE_UPLOAD_COMPLETED, "File upload completed successfully")
+            
+            # Remove from Redis
+            redis_manager.client.delete(f"job:{task_id}")
+            
+            return {
+                "status": "completed", 
+                "message": "File upload completed successfully", 
+                "upload_status": "ok",
+                "upload_count": upload_count
+            }
+        else:
+            print(f"❌ [UPLOAD TASK {task_id}] Some files failed to upload")
+            redis_manager.update_job_status(task_id, JobStatus.FILE_UPLOAD_FAILED, "File upload failed")
+            
+            # Remove from Redis
+            redis_manager.client.delete(f"job:{task_id}")
+            
+            return {
+                "status": "failed", 
+                "message": "File upload failed - not all files uploaded successfully",
+                "upload_status": "failed"
+            }
+    
+    except Exception as e:
+        error_msg = f"File upload processing failed: {str(e)}"
+        print(f"💥 [UPLOAD TASK {task_id}] ERROR: {error_msg}")
+        
+        # Remove failed job from Redis
+        redis_manager.client.delete(f"job:{task_id}")
+        
+        return {"status": "failed", "message": error_msg}

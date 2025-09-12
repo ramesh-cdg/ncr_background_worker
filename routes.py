@@ -2,19 +2,22 @@
 API routes module - Simplified
 """
 import os
+import tempfile
+import shutil
 from datetime import datetime
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 
 from models import (
     JobRequest, JobResponse, JobStatusResponse, 
-    HealthResponse, ActiveJobsResponse, JobStatus
+    HealthResponse, ActiveJobsResponse, JobStatus,
+    FileUploadRequest, FileUploadResponse, FileUploadStatusResponse
 )
 from database import DatabaseManager
 from redis_manager import redis_manager
 from celery_app import celery_app, memory_manager
-from tasks import process_job_task, batch_process_jobs, health_check_task
+from tasks import process_job_task, batch_process_jobs, health_check_task, process_file_upload_task
 from config import settings
 
 
@@ -519,4 +522,139 @@ async def reset_redis_data(reset_request: RedisResetRequest):
         raise
     except Exception as e:
         print(f"❌ [API] Error resetting Redis data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/file-upload", response_model=FileUploadResponse)
+async def process_file_upload(
+    job_id: str = Form(...),
+    row_id: Optional[int] = Form(None),
+    delivery_file: Optional[UploadFile] = File(None),
+    usdz_file: Optional[UploadFile] = File(None),
+    glb_file: Optional[UploadFile] = File(None)
+):
+    """Process file upload with delivery files, USDZ files, and GLB files"""
+    try:
+        print(f"📤 [API] File upload request received for job_id: {job_id}")
+        print(f"   - Row ID: {row_id}")
+        print(f"   - Delivery file: {delivery_file.filename if delivery_file else 'None'}")
+        print(f"   - USDZ file: {usdz_file.filename if usdz_file else 'None'}")
+        print(f"   - GLB file: {glb_file.filename if glb_file else 'None'}")
+        
+        # Check if any files were provided
+        if not any([delivery_file, usdz_file, glb_file]):
+            raise HTTPException(status_code=400, detail="No files provided for upload")
+        
+        # Save uploaded files to temporary locations
+        temp_files = {}
+        
+        try:
+            # Save delivery file
+            if delivery_file:
+                temp_delivery = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+                content = await delivery_file.read()
+                temp_delivery.write(content)
+                temp_delivery.close()
+                temp_files['delivery'] = temp_delivery.name
+                print(f"   ✅ Delivery file saved to: {temp_delivery.name}")
+            
+            # Save USDZ file
+            if usdz_file:
+                temp_usdz = tempfile.NamedTemporaryFile(delete=False, suffix='.usdz')
+                content = await usdz_file.read()
+                temp_usdz.write(content)
+                temp_usdz.close()
+                temp_files['usdz'] = temp_usdz.name
+                print(f"   ✅ USDZ file saved to: {temp_usdz.name}")
+            
+            # Save GLB file
+            if glb_file:
+                temp_glb = tempfile.NamedTemporaryFile(delete=False, suffix='.glb')
+                content = await glb_file.read()
+                temp_glb.write(content)
+                temp_glb.close()
+                temp_files['glb'] = temp_glb.name
+                print(f"   ✅ GLB file saved to: {temp_glb.name}")
+            
+            # Start Celery task
+            celery_result = process_file_upload_task.delay(
+                job_id=job_id,
+                row_id=row_id,
+                delivery_file_path=temp_files.get('delivery'),
+                usdz_file_path=temp_files.get('usdz'),
+                glb_file_path=temp_files.get('glb')
+            )
+            
+            # Use the Celery task ID as the primary task ID
+            task_id = celery_result.id
+            
+            # Create job status in Redis with Celery task ID
+            redis_manager.create_job_status(
+                job_id, 
+                task_id, 
+                "system",  # username for file uploads
+                "FILE_UPLOAD",  # campaign for file uploads
+                row_id,
+                celery_task_id=celery_result.id
+            )
+            
+            return FileUploadResponse(
+                job_id=job_id,
+                status="processing",
+                message="File upload processing started",
+                timestamp=redis_manager.get_current_ny_time(),
+                task_id=task_id
+            )
+            
+        finally:
+            # Clean up temporary files after task is started
+            for temp_file in temp_files.values():
+                try:
+                    os.unlink(temp_file)
+                    print(f"   🧹 Cleaned up temp file: {temp_file}")
+                except Exception as e:
+                    print(f"   ⚠️ Failed to clean up temp file {temp_file}: {e}")
+        
+    except Exception as e:
+        print(f"❌ [API] Error in file upload: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/file-upload-status/{job_id}")
+async def get_file_upload_status(job_id: str):
+    """Get status of a specific file upload job by job_id"""
+    try:
+        print(f"🔍 [API] Looking up file upload job: {job_id}")
+        
+        # Find the task for this job_id
+        matching_jobs = redis_manager.get_jobs_by_job_id(job_id)
+        
+        if not matching_jobs:
+            raise HTTPException(status_code=404, detail=f"No file upload job found with job_id: {job_id}")
+        
+        # Get the first matching job (should be only one since we don't keep historical data)
+        job = matching_jobs[0]
+        
+        # Only return if job is in progress
+        in_progress_statuses = ["file_upload_pending", "file_upload_processing"]
+        if job.get("status") not in in_progress_statuses:
+            raise HTTPException(status_code=404, detail=f"File upload job {job_id} is not in progress (status: {job.get('status')})")
+        
+        print(f"✅ [API] Found in-progress file upload job for job_id {job_id}")
+        
+        return {
+            "job_id": job_id,
+            "task_id": job["task_id"],
+            "celery_task_id": job.get("celery_task_id", ""),
+            "status": job["status"],
+            "progress": job.get("progress", {}),
+            "message": job.get("message", ""),
+            "timestamp": job.get("timestamp", ""),
+            "logs": job.get("logs", [])
+        }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ [API] Error looking up file upload job {job_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

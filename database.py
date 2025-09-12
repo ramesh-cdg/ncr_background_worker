@@ -221,3 +221,90 @@ class DatabaseManager:
         finally:
             cursor.close()
             conn.close()
+    
+    @staticmethod
+    def update_job_files_table(job_id: str, file_path: str, timestamp: str):
+        """Update or insert file path in job_files table"""
+        conn = DatabaseManager.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Check if file_path exists
+            cursor.execute("SELECT id FROM job_files WHERE file_path = %s AND file_type = 'base'", (file_path,))
+            
+            if cursor.fetchone():
+                # Update timestamp if exists
+                cursor.execute("UPDATE job_files SET timestamp = %s WHERE file_path = %s AND file_type = 'base'", (timestamp, file_path))
+            else:
+                # Insert new entry
+                cursor.execute("INSERT INTO job_files (job_id, file_path, file_type, timestamp) VALUES (%s, %s, 'base', %s)", (job_id, file_path, timestamp))
+            
+            conn.commit()
+            
+        except Exception as e:
+            conn.rollback()
+            print(f"❌ [DB] Error updating job_files table: {e}")
+            # Don't raise the exception to avoid breaking the main flow
+        finally:
+            cursor.close()
+            conn.close()
+    
+    @staticmethod
+    def update_job_details_for_file_upload(
+        job_id: str, 
+        sku_id: str, 
+        upload_count: int, 
+        campaign: str, 
+        usdz_path: str, 
+        glb_path: str, 
+        current_datetime: str,
+        row_id: Optional[int] = None
+    ) -> bool:
+        """Update job details after successful file upload"""
+        conn = DatabaseManager.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Insert into file_upload_reports table
+            cursor.execute("""
+                INSERT INTO file_upload_reports 
+                (job_id, sku_id, upload_count, campagin, file_status, QC_status, delivery_path, glb_path, timestamp, last_update) 
+                VALUES (%s, %s, %s, %s, 'IAPPROVED', 'INTERNAL', %s, %s, %s, %s)
+            """, (job_id, sku_id, upload_count, campaign, usdz_path, glb_path, current_datetime, current_datetime))
+            
+            # Insert into email table
+            cursor.execute("""
+                INSERT INTO email (sku, status, campagin) 
+                VALUES (%s, 'Waiting', %s)
+            """, (sku_id, campaign))
+            
+            # Insert into history_log table
+            cursor.execute("""
+                INSERT INTO history_log (sku_id, action, action_by, timestamp) 
+                VALUES (%s, 'review', %s, %s)
+            """, (sku_id, 'system', current_datetime))
+            
+            # Update job_details table
+            if row_id:
+                cursor.execute("""
+                    UPDATE job_details 
+                    SET job_status = 'IAPPROVED', uploadTime = %s, updateTime = %s 
+                    WHERE id = %s
+                """, (current_datetime, current_datetime, row_id))
+            else:
+                cursor.execute("""
+                    UPDATE job_details 
+                    SET job_status = 'IAPPROVED', uploadTime = %s, updateTime = %s 
+                    WHERE job_id = %s
+                """, (current_datetime, current_datetime, job_id))
+            
+            conn.commit()
+            return True
+            
+        except Exception as e:
+            conn.rollback()
+            print(f"❌ [DB] Error updating job details for file upload: {e}")
+            return False
+        finally:
+            cursor.close()
+            conn.close()

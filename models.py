@@ -47,6 +47,35 @@ class ActiveJobsResponse(BaseModel):
     count: int
 
 
+class FileUploadRequest(BaseModel):
+    """Request model for file upload processing"""
+    job_id: str
+    row_id: Optional[int] = None
+
+
+class FileUploadResponse(BaseModel):
+    """Response model for file upload processing"""
+    job_id: str
+    status: str
+    message: str
+    timestamp: datetime
+    task_id: str
+    upload_count: Optional[int] = None
+
+
+class FileUploadStatusResponse(BaseModel):
+    """Response model for file upload status"""
+    job_id: str
+    task_id: str
+    status: str
+    progress: Dict[str, Any]
+    message: str
+    timestamp: datetime
+    upload_count: Optional[int] = None
+    file_status: Optional[str] = None
+    qc_status: Optional[str] = None
+
+
 # Job status constants
 class JobStatus:
     PENDING = "pending"
@@ -56,3 +85,7 @@ class JobStatus:
     VALIDATION_PASSED = "validation_passed"
     VALIDATION_FAILED = "validation_failed"
     UPLOADING = "uploading"
+    FILE_UPLOAD_PENDING = "file_upload_pending"
+    FILE_UPLOAD_PROCESSING = "file_upload_processing"
+    FILE_UPLOAD_COMPLETED = "file_upload_completed"
+    FILE_UPLOAD_FAILED = "file_upload_failed"
