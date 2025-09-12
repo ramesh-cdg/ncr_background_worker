@@ -187,3 +187,37 @@ class DatabaseManager:
         finally:
             cursor.close()
             conn.close()
+    
+    @staticmethod
+    def save_validation_failed_request(
+        job_id: str, 
+        sku_id: str, 
+        response: str, 
+        api_url: str, 
+        username: str, 
+        campaign: str, 
+        row_id: Optional[int] = None
+    ):
+        """Save failed validation request to validation_failed_req table"""
+        conn = DatabaseManager.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute(
+                """
+                INSERT INTO validation_failed_req 
+                (job_id, sku_id, response, api_url, username, campaign, row_id, timestamp) 
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                """, 
+                (job_id, sku_id, response, api_url, username, campaign, row_id)
+            )
+            conn.commit()
+            print(f"🗄️ [DB] Failed validation request logged to validation_failed_req table")
+            
+        except Exception as e:
+            conn.rollback()
+            print(f"❌ [DB] Error saving failed validation request: {e}")
+            # Don't raise the exception to avoid breaking the main flow
+        finally:
+            cursor.close()
+            conn.close()

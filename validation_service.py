@@ -60,6 +60,19 @@ class ValidationService:
             if response.status_code != 200:
                 print(f"❌ [VALIDATOR] HTTP error: {response.status_code}")
                 print(f"   - Response text: {response.text}")
+                
+                # Log failed validation request to database
+                print(f"🗄️ [VALIDATOR] Logging failed validation request...")
+                DatabaseManager.save_validation_failed_request(
+                    job_id=job_id,
+                    sku_id=sku_id,
+                    response=response.text,
+                    api_url=api_url,
+                    username=username,
+                    campaign=campaign,
+                    row_id=row_id
+                )
+                
                 return False
             
             response_data = response.json()
