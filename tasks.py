@@ -19,6 +19,23 @@ import zipfile
 import tempfile
 import shutil
 from botocore.exceptions import ClientError
+
+
+def cleanup_temp_files(delivery_file_path: Optional[str], usdz_file_path: Optional[str], glb_file_path: Optional[str], task_id: str):
+    """Clean up temporary files after processing"""
+    temp_files = [delivery_file_path, usdz_file_path, glb_file_path]
+    
+    for temp_file in temp_files:
+        if temp_file and os.path.exists(temp_file):
+            try:
+                os.unlink(temp_file)
+                print(f"   🧹 [TASK {task_id}] Cleaned up temp file: {temp_file}")
+            except Exception as e:
+                print(f"   ⚠️ [TASK {task_id}] Failed to clean up temp file {temp_file}: {e}")
+        elif temp_file:
+            print(f"   ℹ️ [TASK {task_id}] Temp file already cleaned or doesn't exist: {temp_file}")
+
+
 from config import settings
 
 
@@ -512,7 +529,6 @@ def process_file_upload_task(
         glb_validation = "1"
         
         # Initialize file paths (like PHP - start as None/null)
-        # These will be set during delivery file processing or individual file processing
         usdz_path = None
         glb_path = None
         
@@ -590,22 +606,22 @@ def process_file_upload_task(
                         
                         if extension == '.glb':
                             if glb_path is None:
-                                # First GLB file becomes the main GLB file (matching PHP logic)
+                                # First GLB file becomes the main GLB file
                                 glb_path = f"jobs/{job_id}/GLB_files/mesh.glb"
                                 s3_key = glb_path
                                 print(f"      🎮 Set as main GLB file: {s3_key}")
                             else:
-                                # Additional GLB files go to Delivery_files (matching PHP logic)
+                                # Additional GLB files go to Delivery_files
                                 s3_key = f"jobs/{job_id}/Delivery_files/{relative_path}"
                                 print(f"      🎮 Additional GLB file: {s3_key}")
                         elif extension == '.usdz':
                             if usdz_path is None:
-                                # First USDZ file becomes the main USDZ file (matching PHP logic)
+                                # First USDZ file becomes the main USDZ file
                                 usdz_path = f"jobs/{job_id}/usdz_files/mesh.usdz"
                                 s3_key = usdz_path
                                 print(f"      📱 Set as main USDZ file: {s3_key}")
                             else:
-                                # Additional USDZ files go to Delivery_files (matching PHP logic)
+                                # Additional USDZ files go to Delivery_files
                                 s3_key = f"jobs/{job_id}/Delivery_files/{relative_path}"
                                 print(f"      📱 Additional USDZ file: {s3_key}")
                         else:
@@ -691,7 +707,6 @@ def process_file_upload_task(
                     ExtraArgs={'ACL': 'private'}
                 )
                 
-                # Set usdz_path (matching PHP logic exactly)
                 usdz_path = s3_key_usdz
                 usdz_validation = "1"
                 print(f"   ✅ USDZ uploaded: {s3_key_usdz}")
@@ -728,7 +743,6 @@ def process_file_upload_task(
                     ExtraArgs={'ACL': 'private'}
                 )
                 
-                # Set glb_path (matching PHP logic exactly)
                 glb_path = s3_key_glb
                 glb_validation = "1"
                 print(f"   ✅ GLB uploaded: {s3_key_glb}")
@@ -757,7 +771,15 @@ def process_file_upload_task(
         print(f"   - USDZ path: {usdz_path if usdz_path else 'None'}")
         print(f"   - GLB path: {glb_path if glb_path else 'None'}")
         
-        if deliverable_validation == '1' and usdz_validation == "1" and glb_validation == "1":
+        # Debug validation logic
+        validation_passed = deliverable_validation == '1' and usdz_validation == "1" and glb_validation == "1"
+        print(f"🔍 [UPLOAD TASK {task_id}] Validation check:")
+        print(f"   - deliverable_validation == '1': {deliverable_validation == '1'}")
+        print(f"   - usdz_validation == '1': {usdz_validation == '1'}")
+        print(f"   - glb_validation == '1': {glb_validation == '1'}")
+        print(f"   - Overall validation passed: {validation_passed}")
+        
+        if validation_passed:
             print(f"✅ [UPLOAD TASK {task_id}] All files uploaded successfully")
             redis_manager.update_job_status(
                 task_id, 
@@ -823,23 +845,13 @@ def process_file_upload_task(
                         }
                     )
                     
-                    # Update job_details table (like PHP - using row_id if available, otherwise job_id)
-                    if row_id:
-                        update_sql = """
-                            UPDATE job_details 
-                            SET job_status = 'WIP', is_uploaded = 1, updateTime = %s 
-                            WHERE id = %s
-                        """
-                        cursor.execute(update_sql, (current_datetime, row_id))
-                        print(f"   📝 Updated job_details using row_id: {row_id}")
-                    else:
-                        update_sql = """
-                            UPDATE job_details 
-                            SET job_status = 'WIP', is_uploaded = 1, updateTime = %s 
-                            WHERE job_id = %s
-                        """
-                        cursor.execute(update_sql, (current_datetime, job_id))
-                        print(f"   📝 Updated job_details using job_id: {job_id}")
+                    # Update job_details table (like PHP)
+                    update_sql = """
+                        UPDATE job_details 
+                        SET job_status = 'WIP', is_uploaded = 1, updateTime = %s 
+                        WHERE id = %s
+                    """
+                    cursor.execute(update_sql, (current_datetime, row_id))
                     
                     conn.commit()
                     print(f"   ✅ Database updated successfully")
@@ -848,6 +860,9 @@ def process_file_upload_task(
                     
                     # Remove from Redis
                     redis_manager.client.delete(f"job:{task_id}")
+                    
+                    # Clean up temporary files
+                    cleanup_temp_files(delivery_file_path, usdz_file_path, glb_file_path, task_id)
                     
                     return {
                         "status": "completed", 
@@ -899,6 +914,9 @@ def process_file_upload_task(
             # Remove from Redis
             redis_manager.client.delete(f"job:{task_id}")
             
+            # Clean up temporary files on validation failure
+            cleanup_temp_files(delivery_file_path, usdz_file_path, glb_file_path, task_id)
+            
             return {
                 "status": "failed", 
                 "message": "File upload failed - validation check failed",
@@ -916,5 +934,8 @@ def process_file_upload_task(
         
         # Remove failed job from Redis
         redis_manager.client.delete(f"job:{task_id}")
+        
+        # Clean up temporary files even on failure
+        cleanup_temp_files(delivery_file_path, usdz_file_path, glb_file_path, task_id)
         
         return {"status": "failed", "message": error_msg}
