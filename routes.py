@@ -4,6 +4,7 @@ API routes module - Simplified
 import os
 import tempfile
 import shutil
+import zipfile
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from typing import Optional, List, Dict, Any
@@ -533,50 +534,129 @@ async def process_file_upload(
     usdz_file: Optional[UploadFile] = File(None),
     glb_file: Optional[UploadFile] = File(None)
 ):
-    """Process file upload with delivery files, USDZ files, and GLB files"""
+    """
+    Enhanced file upload endpoint with comprehensive validation and processing
+    
+    This endpoint handles:
+    - Delivery files (ZIP archives with multiple files)
+    - USDZ files (3D model files)
+    - GLB files (3D model files)
+    
+    Features:
+    - File type validation
+    - ZIP extraction and processing
+    - Automatic file organization
+    - S3 upload with proper key generation
+    - Database tracking and status updates
+    """
     try:
-        print(f"📤 [API] File upload request received for job_id: {job_id}")
+        print(f"📤 [API] Enhanced file upload request received for job_id: {job_id}")
         print(f"   - Row ID: {row_id}")
         print(f"   - Delivery file: {delivery_file.filename if delivery_file else 'None'}")
         print(f"   - USDZ file: {usdz_file.filename if usdz_file else 'None'}")
         print(f"   - GLB file: {glb_file.filename if glb_file else 'None'}")
         
-        # Check if any files were provided
+        # Validate that at least one file was provided
         if not any([delivery_file, usdz_file, glb_file]):
             raise HTTPException(status_code=400, detail="No files provided for upload")
         
-        # Save uploaded files to temporary locations
+        # Validate file types and sizes
+        max_file_size = 100 * 1024 * 1024  # 100MB limit
+        for file_info in [
+            ("delivery", delivery_file, [".zip"]),
+            ("usdz", usdz_file, [".usdz"]),
+            ("glb", glb_file, [".glb"])
+        ]:
+            file_type, file, allowed_extensions = file_info
+            if file:
+                # Check file extension
+                if file.filename:
+                    file_ext = os.path.splitext(file.filename)[1].lower()
+                    if file_ext not in allowed_extensions:
+                        raise HTTPException(
+                            status_code=400, 
+                            detail=f"Invalid file type for {file_type}: {file_ext}. Allowed: {allowed_extensions}"
+                        )
+                
+                # Check file size (read content to check size)
+                content = await file.read()
+                if len(content) > max_file_size:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"File too large for {file_type}: {len(content)} bytes. Max: {max_file_size} bytes"
+                    )
+                
+                # Reset file pointer for later processing
+                await file.seek(0)
+        
+        # Check job status before processing
+        try:
+            conn = DatabaseManager.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT job_status FROM job_details WHERE job_id = %s", (job_id,))
+            job_result = cursor.fetchone()
+            
+            if job_result:
+                job_status = job_result[0]
+                if job_status in ['IAPPROVED', 'EAPPROVED']:
+                    print(f"⚠️ [API] Job already approved: {job_status}")
+                    return FileUploadResponse(
+                        job_id=job_id,
+                        status="already_approved",
+                        message=f"Job already approved with status: {job_status}",
+                        timestamp=redis_manager.get_current_ny_time(),
+                        task_id=""
+                    )
+            else:
+                print(f"⚠️ [API] Job not found in database: {job_id}")
+                raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+                
+        finally:
+            cursor.close()
+            conn.close()
+        
+        # Save uploaded files to temporary locations with proper validation
         temp_files = {}
         
         try:
-            # Save delivery file
+            # Save delivery file with validation
             if delivery_file:
                 temp_delivery = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
                 content = await delivery_file.read()
                 temp_delivery.write(content)
                 temp_delivery.close()
                 temp_files['delivery'] = temp_delivery.name
-                print(f"   ✅ Delivery file saved to: {temp_delivery.name}")
+                print(f"   ✅ Delivery file saved to: {temp_delivery.name} ({len(content)} bytes)")
+                
+                # Validate ZIP file
+                try:
+                    with zipfile.ZipFile(temp_delivery.name, 'r') as zip_ref:
+                        file_list = zip_ref.namelist()
+                        print(f"   📦 ZIP contains {len(file_list)} files")
+                        if len(file_list) == 0:
+                            raise HTTPException(status_code=400, detail="ZIP file is empty")
+                except zipfile.BadZipFile:
+                    raise HTTPException(status_code=400, detail="Invalid ZIP file format")
             
-            # Save USDZ file
+            # Save USDZ file with validation
             if usdz_file:
                 temp_usdz = tempfile.NamedTemporaryFile(delete=False, suffix='.usdz')
                 content = await usdz_file.read()
                 temp_usdz.write(content)
                 temp_usdz.close()
                 temp_files['usdz'] = temp_usdz.name
-                print(f"   ✅ USDZ file saved to: {temp_usdz.name}")
+                print(f"   ✅ USDZ file saved to: {temp_usdz.name} ({len(content)} bytes)")
             
-            # Save GLB file
+            # Save GLB file with validation
             if glb_file:
                 temp_glb = tempfile.NamedTemporaryFile(delete=False, suffix='.glb')
                 content = await glb_file.read()
                 temp_glb.write(content)
                 temp_glb.close()
                 temp_files['glb'] = temp_glb.name
-                print(f"   ✅ GLB file saved to: {temp_glb.name}")
+                print(f"   ✅ GLB file saved to: {temp_glb.name} ({len(content)} bytes)")
             
-            # Start Celery task
+            # Start enhanced Celery task
             celery_result = process_file_upload_task.delay(
                 job_id=job_id,
                 row_id=row_id,
@@ -598,6 +678,8 @@ async def process_file_upload(
                 celery_task_id=celery_result.id
             )
             
+            print(f"✅ [API] File upload task started with task_id: {task_id}")
+            
             return FileUploadResponse(
                 job_id=job_id,
                 status="processing",
@@ -615,6 +697,8 @@ async def process_file_upload(
                 except Exception as e:
                     print(f"   ⚠️ Failed to clean up temp file {temp_file}: {e}")
         
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ [API] Error in file upload: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -622,7 +706,15 @@ async def process_file_upload(
 
 @router.get("/file-upload-status/{job_id}")
 async def get_file_upload_status(job_id: str):
-    """Get status of a specific file upload job by job_id"""
+    """
+    Enhanced file upload status endpoint with comprehensive tracking
+    
+    This endpoint provides detailed status information for file upload jobs including:
+    - Real-time processing status
+    - Upload progress and validation details
+    - File paths and upload counts
+    - Error details if any
+    """
     try:
         print(f"🔍 [API] Looking up file upload job: {job_id}")
         
@@ -635,12 +727,52 @@ async def get_file_upload_status(job_id: str):
         # Get the first matching job (should be only one since we don't keep historical data)
         job = matching_jobs[0]
         
-        # Only return if job is in progress
+        # Check if job is in progress
         in_progress_statuses = ["file_upload_pending", "file_upload_processing"]
         if job.get("status") not in in_progress_statuses:
-            raise HTTPException(status_code=404, detail=f"File upload job {job_id} is not in progress (status: {job.get('status')})")
+            # If not in progress, check if it's completed or failed
+            if job.get("status") in ["file_upload_completed", "file_upload_failed"]:
+                print(f"ℹ️ [API] File upload job {job_id} is finished with status: {job.get('status')}")
+                return {
+                    "job_id": job_id,
+                    "task_id": job.get("task_id", ""),
+                    "celery_task_id": job.get("celery_task_id", ""),
+                    "status": job["status"],
+                    "progress": job.get("progress", {}),
+                    "message": job.get("message", ""),
+                    "timestamp": job.get("timestamp", ""),
+                    "logs": job.get("logs", []),
+                    "finished": True
+                }
+            else:
+                raise HTTPException(status_code=404, detail=f"File upload job {job_id} is not in progress (status: {job.get('status')})")
         
         print(f"✅ [API] Found in-progress file upload job for job_id {job_id}")
+        
+        # Get additional job details from database for context
+        job_details = {}
+        try:
+            conn = DatabaseManager.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT sku_id, campaign, job_status, upload_count 
+                FROM job_details 
+                WHERE job_id = %s
+            """, (job_id,))
+            db_result = cursor.fetchone()
+            if db_result:
+                job_details = {
+                    "sku_id": db_result[0],
+                    "campaign": db_result[1],
+                    "job_status": db_result[2],
+                    "upload_count": db_result[3]
+                }
+        except Exception as e:
+            print(f"⚠️ [API] Could not fetch job details from database: {e}")
+        finally:
+            if 'conn' in locals():
+                cursor.close()
+                conn.close()
         
         return {
             "job_id": job_id,
@@ -650,11 +782,87 @@ async def get_file_upload_status(job_id: str):
             "progress": job.get("progress", {}),
             "message": job.get("message", ""),
             "timestamp": job.get("timestamp", ""),
-            "logs": job.get("logs", [])
+            "logs": job.get("logs", []),
+            "job_details": job_details,
+            "finished": False
         }
             
     except HTTPException:
         raise
     except Exception as e:
         print(f"❌ [API] Error looking up file upload job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/file-upload-history/{job_id}")
+async def get_file_upload_history(job_id: str):
+    """
+    Get file upload history and reports for a specific job
+    
+    This endpoint provides historical information about file uploads for a job:
+    - Upload reports from file_upload_reports table
+    - File paths and upload counts
+    - Historical upload attempts
+    """
+    try:
+        print(f"🔍 [API] Getting file upload history for job_id: {job_id}")
+        
+        # Get upload history from database
+        conn = DatabaseManager.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Get file upload reports
+            cursor.execute("""
+                SELECT upload_count, file_status, QC_status, delivery_path, glb_path, timestamp, last_update
+                FROM file_upload_reports 
+                WHERE job_id = %s 
+                ORDER BY timestamp DESC
+            """, (job_id,))
+            
+            upload_reports = []
+            for row in cursor.fetchall():
+                upload_reports.append({
+                    "upload_count": row[0],
+                    "file_status": row[1],
+                    "qc_status": row[2],
+                    "delivery_path": row[3],
+                    "glb_path": row[4],
+                    "timestamp": row[5],
+                    "last_update": row[6]
+                })
+            
+            # Get job details
+            cursor.execute("""
+                SELECT sku_id, campaign, job_status, upload_count, uploadTime, updateTime
+                FROM job_details 
+                WHERE job_id = %s
+            """, (job_id,))
+            
+            job_details = None
+            db_result = cursor.fetchone()
+            if db_result:
+                job_details = {
+                    "sku_id": db_result[0],
+                    "campaign": db_result[1],
+                    "job_status": db_result[2],
+                    "upload_count": db_result[3],
+                    "upload_time": db_result[4],
+                    "update_time": db_result[5]
+                }
+            
+            return {
+                "job_id": job_id,
+                "job_details": job_details,
+                "upload_reports": upload_reports,
+                "total_uploads": len(upload_reports),
+                "timestamp": redis_manager.get_current_ny_time()
+            }
+            
+        finally:
+            cursor.close()
+            conn.close()
+            
+    except Exception as e:
+        print(f"❌ [API] Error getting file upload history for job {job_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
