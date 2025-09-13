@@ -116,7 +116,7 @@ setup_letsencrypt() {
     
     # Generate Let's Encrypt certificate
     log "Requesting Let's Encrypt certificate for $DOMAIN_NAME..."
-    if docker compose --profile ssl-setup run --rm certbot; then
+    if docker compose --profile ssl-setup run --rm certbot certonly --webroot --webroot-path=/var/www/certbot --email $EMAIL --agree-tos --no-eff-email -d $DOMAIN_NAME; then
         log "Let's Encrypt certificate obtained successfully!"
         
         # Reload nginx with new certificates
@@ -134,7 +134,7 @@ renew_ssl() {
     log "Renewing SSL certificates..."
     
     # Run certbot renewal
-    docker compose run --rm certbot renew
+    docker compose --profile ssl-setup run --rm certbot renew
     
     # Reload nginx
     docker compose exec nginx nginx -s reload
