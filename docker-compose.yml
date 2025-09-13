@@ -35,7 +35,7 @@ services:
     env_file:
       - .env
     volumes:
-      - temp_files:/tmp/ncr_uploads  # Shared volume for temporary files
+      - ./temp_uploads:/tmp/ncr_uploads:rw  # Host directory for temporary files
     restart: unless-stopped
     depends_on:
       - redis
@@ -64,7 +64,7 @@ services:
     env_file:
       - .env
     volumes:
-      - temp_files:/tmp/ncr_uploads  # Shared volume for temporary files
+      - ./temp_uploads:/tmp/ncr_uploads:rw  # Host directory for temporary files
     restart: unless-stopped
     depends_on:
       - redis

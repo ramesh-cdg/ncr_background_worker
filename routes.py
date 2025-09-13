@@ -31,10 +31,16 @@ def get_temp_directory() -> str:
     if os.path.exists("/tmp") and os.access("/tmp", os.W_OK):
         # Try to create Docker shared volume directory
         try:
-            os.makedirs(docker_temp_dir, exist_ok=True)
+            os.makedirs(docker_temp_dir, mode=0o777, exist_ok=True)
+            # Test write permissions
+            test_file = os.path.join(docker_temp_dir, f"test_{uuid.uuid4().hex}")
+            with open(test_file, 'w') as f:
+                f.write("test")
+            os.unlink(test_file)
             return docker_temp_dir
-        except (OSError, PermissionError):
-            print(f"⚠️ Could not create Docker temp directory {docker_temp_dir}, falling back to system temp")
+        except (OSError, PermissionError) as e:
+            print(f"⚠️ Could not use Docker temp directory {docker_temp_dir}: {e}")
+            print(f"⚠️ Falling back to system temp directory")
     
     # Fallback to system temp directory
     return tempfile.gettempdir()
