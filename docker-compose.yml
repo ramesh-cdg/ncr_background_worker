@@ -34,6 +34,8 @@ services:
       - GUNICORN_BIND=0.0.0.0:8001
     env_file:
       - .env
+    volumes:
+      - temp_files:/tmp/ncr_uploads  # Shared volume for temporary files
     restart: unless-stopped
     depends_on:
       - redis
@@ -61,6 +63,8 @@ services:
       - REDIS_PORT=6379  # Internal Redis port
     env_file:
       - .env
+    volumes:
+      - temp_files:/tmp/ncr_uploads  # Shared volume for temporary files
     restart: unless-stopped
     depends_on:
       - redis
@@ -154,3 +158,4 @@ services:
 volumes:
   redis_data:
   nginx_logs:
+  temp_files:  # Shared volume for temporary file uploads

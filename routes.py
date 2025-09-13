@@ -5,6 +5,7 @@ import os
 import tempfile
 import shutil
 import zipfile
+import uuid
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from typing import Optional, List, Dict, Any
@@ -20,6 +21,23 @@ from redis_manager import redis_manager
 from celery_app import celery_app, memory_manager
 from tasks import process_job_task, batch_process_jobs, health_check_task, process_file_upload_task
 from config import settings
+
+
+def get_temp_directory() -> str:
+    """Get the appropriate temp directory for file uploads (Docker-aware)"""
+    docker_temp_dir = "/tmp/ncr_uploads"
+    
+    # Check if we're in Docker environment
+    if os.path.exists("/tmp") and os.access("/tmp", os.W_OK):
+        # Try to create Docker shared volume directory
+        try:
+            os.makedirs(docker_temp_dir, exist_ok=True)
+            return docker_temp_dir
+        except (OSError, PermissionError):
+            print(f"⚠️ Could not create Docker temp directory {docker_temp_dir}, falling back to system temp")
+    
+    # Fallback to system temp directory
+    return tempfile.gettempdir()
 
 
 # Create router
@@ -632,17 +650,23 @@ async def process_file_upload(
             # Save delivery file with validation
             if delivery_file:
                 print(f"   🔍 Processing delivery file: {delivery_file.filename}")
-                temp_delivery = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+                # Use Docker-aware temp directory
+                temp_dir = get_temp_directory()
+                temp_filename = f"delivery_upload_{uuid.uuid4().hex}.zip"
+                temp_path = os.path.join(temp_dir, temp_filename)
+                
                 content = await delivery_file.read()
-                temp_delivery.write(content)
-                temp_delivery.close()
-                temp_files['delivery'] = temp_delivery.name
-                print(f"   ✅ Delivery file saved to: {temp_delivery.name} ({len(content)} bytes)")
+                with open(temp_path, 'wb') as f:
+                    f.write(content)
+                
+                temp_files['delivery'] = temp_path
+                print(f"   ✅ Delivery file saved to: {temp_path} ({len(content)} bytes)")
+                print(f"   🔍 File exists after save: {os.path.exists(temp_path)}")
                 
                 # Validate ZIP file
                 try:
                     print(f"   🔍 Attempting to validate as ZIP file...")
-                    with zipfile.ZipFile(temp_delivery.name, 'r') as zip_ref:
+                    with zipfile.ZipFile(temp_path, 'r') as zip_ref:
                         file_list = zip_ref.namelist()
                         print(f"   📦 ZIP contains {len(file_list)} files")
                         if len(file_list) == 0:
@@ -653,22 +677,35 @@ async def process_file_upload(
             
             # Save USDZ file with validation
             if usdz_file:
-                temp_usdz = tempfile.NamedTemporaryFile(delete=False, suffix='.usdz')
+                print(f"   🔍 Processing USDZ file: {usdz_file.filename}")
+                # Use Docker-aware temp directory
+                temp_dir = get_temp_directory()
+                temp_filename = f"usdz_upload_{uuid.uuid4().hex}.usdz"
+                temp_path = os.path.join(temp_dir, temp_filename)
+                
                 content = await usdz_file.read()
-                temp_usdz.write(content)
-                temp_usdz.close()
-                temp_files['usdz'] = temp_usdz.name
-                print(f"   ✅ USDZ file saved to: {temp_usdz.name} ({len(content)} bytes)")
+                with open(temp_path, 'wb') as f:
+                    f.write(content)
+                
+                temp_files['usdz'] = temp_path
+                print(f"   ✅ USDZ file saved to: {temp_path} ({len(content)} bytes)")
+                print(f"   🔍 File exists after save: {os.path.exists(temp_path)}")
             
             # Save GLB file with validation
             if glb_file:
                 print(f"   🔍 Processing GLB file: {glb_file.filename}")
-                temp_glb = tempfile.NamedTemporaryFile(delete=False, suffix='.glb')
+                # Use Docker-aware temp directory
+                temp_dir = get_temp_directory()
+                temp_filename = f"glb_upload_{uuid.uuid4().hex}.glb"
+                temp_path = os.path.join(temp_dir, temp_filename)
+                
                 content = await glb_file.read()
-                temp_glb.write(content)
-                temp_glb.close()
-                temp_files['glb'] = temp_glb.name
-                print(f"   ✅ GLB file saved to: {temp_glb.name} ({len(content)} bytes)")
+                with open(temp_path, 'wb') as f:
+                    f.write(content)
+                
+                temp_files['glb'] = temp_path
+                print(f"   ✅ GLB file saved to: {temp_path} ({len(content)} bytes)")
+                print(f"   🔍 File exists after save: {os.path.exists(temp_path)}")
             
             # Start enhanced Celery task
             print(f"🔍 [API] Starting Celery task with file paths:")
