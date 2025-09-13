@@ -133,7 +133,7 @@ setup_letsencrypt() {
         --email $EMAIL \
         --agree-tos \
         --no-eff-email \
-        --force-renewal \
+        --non-interactive \
         -d $DOMAIN_NAME; then
         
         log "✅ FREE Let's Encrypt certificate obtained successfully!"
@@ -162,7 +162,8 @@ renew_ssl() {
     if docker run --rm \
         -v "$(pwd)/ssl:/etc/letsencrypt" \
         -v "$(pwd)/certbot/www:/var/www/certbot" \
-        certbot/certbot renew; then
+        certbot/certbot renew \
+        --non-interactive; then
         
         log "✅ Let's Encrypt certificates renewed successfully!"
         
