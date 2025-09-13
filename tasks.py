@@ -628,6 +628,10 @@ def process_file_upload_task(
             except Exception as e:
                 print(f"❌ [UPLOAD TASK {task_id}] Delivery file processing failed: {e}")
                 deliverable_validation = "0"
+        else:
+            # No delivery file provided - set validation to 1 (like PHP logic)
+            deliverable_validation = "1"
+            print(f"📦 [UPLOAD TASK {task_id}] No delivery file provided - validation set to 1")
         
         # Process USDZ file - Enhanced with PHP-like logic
         if usdz_file_path and os.path.exists(usdz_file_path):
@@ -662,6 +666,12 @@ def process_file_upload_task(
             except Exception as e:
                 print(f"   ❌ USDZ processing failed: {e}")
                 usdz_validation = "0"
+        else:
+            # No USDZ file provided - set validation to 1 (like PHP logic)
+            usdz_validation = "1"
+            if not usdz_path:
+                usdz_path = ""
+            print(f"📱 [UPLOAD TASK {task_id}] No USDZ file provided - validation set to 1")
         
         # Process GLB file - Enhanced with PHP-like logic
         if glb_file_path and os.path.exists(glb_file_path):
@@ -696,6 +706,12 @@ def process_file_upload_task(
             except Exception as e:
                 print(f"   ❌ GLB processing failed: {e}")
                 glb_validation = "0"
+        else:
+            # No GLB file provided - set validation to 1 (like PHP logic)
+            glb_validation = "1"
+            if not glb_path:
+                glb_path = ""
+            print(f"🎮 [UPLOAD TASK {task_id}] No GLB file provided - validation set to 1")
         
         # Final validation check (matching PHP logic)
         print(f"📊 [UPLOAD TASK {task_id}] Upload validation summary:")
@@ -709,15 +725,35 @@ def process_file_upload_task(
             print(f"✅ [UPLOAD TASK {task_id}] All files uploaded successfully")
             redis_manager.update_job_status(task_id, JobStatus.FILE_UPLOAD_PROCESSING, "Updating database with upload results")
             
-            # Update database with successful upload (like PHP database operations)
+            # Update database with successful upload (matching PHP logic)
             try:
-                success = DatabaseManager.update_job_details_for_file_upload(
-                    job_id, sku_id, upload_count, campaign, usdz_path, glb_path, 
-                    current_datetime, row_id
-                )
+                # Insert into file_upload_reports table (like PHP)
+                conn = DatabaseManager.get_connection()
+                cursor = conn.cursor()
                 
-                if success:
+                try:
+                    # Insert file upload report
+                    insert_sql = """
+                        INSERT INTO file_upload_reports 
+                        (job_id, sku_id, upload_count, campagin, file_status, QC_status, delivery_path, glb_path, timestamp, last_update) 
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """
+                    cursor.execute(insert_sql, (
+                        job_id, sku_id, upload_count, campaign, 'IAPPROVED', 'INTERNAL', 
+                        usdz_path, glb_path, current_datetime, current_datetime
+                    ))
+                    
+                    # Update job_details table (like PHP)
+                    update_sql = """
+                        UPDATE job_details 
+                        SET job_status = 'WIP', is_uploaded = 1, updateTime = %s 
+                        WHERE id = %s
+                    """
+                    cursor.execute(update_sql, (current_datetime, row_id))
+                    
+                    conn.commit()
                     print(f"   ✅ Database updated successfully")
+                    
                     redis_manager.update_job_status(task_id, JobStatus.FILE_UPLOAD_COMPLETED, "File upload completed successfully")
                     
                     # Remove from Redis
@@ -731,8 +767,10 @@ def process_file_upload_task(
                         "usdz_path": usdz_path,
                         "glb_path": glb_path
                     }
-                else:
-                    print(f"   ❌ Database update failed")
+                    
+                except Exception as e:
+                    conn.rollback()
+                    print(f"   ❌ Database update failed: {e}")
                     redis_manager.update_job_status(task_id, JobStatus.FILE_UPLOAD_FAILED, "Database update failed")
                     
                     # Remove from Redis
@@ -744,16 +782,20 @@ def process_file_upload_task(
                         "upload_status": "failed"
                     }
                     
+                finally:
+                    cursor.close()
+                    conn.close()
+                    
             except Exception as e:
-                print(f"   ❌ Database update error: {e}")
-                redis_manager.update_job_status(task_id, JobStatus.FILE_UPLOAD_FAILED, f"Database update error: {str(e)}")
+                print(f"   ❌ Database connection error: {e}")
+                redis_manager.update_job_status(task_id, JobStatus.FILE_UPLOAD_FAILED, f"Database connection error: {str(e)}")
                 
                 # Remove from Redis
                 redis_manager.client.delete(f"job:{task_id}")
                 
                 return {
                     "status": "failed", 
-                    "message": f"Database update error: {str(e)}",
+                    "message": f"Database connection error: {str(e)}",
                     "upload_status": "failed"
                 }
         else:
