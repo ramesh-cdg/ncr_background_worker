@@ -24,26 +24,27 @@ from config import settings
 
 
 def get_temp_directory() -> str:
-    """Get the appropriate temp directory for file uploads (Docker-aware)"""
-    docker_temp_dir = "/tmp/ncr_uploads"
+    """Get the appropriate temp directory for file uploads (Host machine path)"""
+    # Use host machine path that's mounted into containers
+    host_temp_dir = "/app/temp_uploads"  # This will be mounted from host
     
-    # Check if we're in Docker environment
-    if os.path.exists("/tmp") and os.access("/tmp", os.W_OK):
-        # Try to create Docker shared volume directory
-        try:
-            os.makedirs(docker_temp_dir, mode=0o777, exist_ok=True)
-            # Test write permissions
-            test_file = os.path.join(docker_temp_dir, f"test_{uuid.uuid4().hex}")
-            with open(test_file, 'w') as f:
-                f.write("test")
-            os.unlink(test_file)
-            return docker_temp_dir
-        except (OSError, PermissionError) as e:
-            print(f"⚠️ Could not use Docker temp directory {docker_temp_dir}: {e}")
-            print(f"⚠️ Falling back to system temp directory")
-    
-    # Fallback to system temp directory
-    return tempfile.gettempdir()
+    try:
+        # Create directory if it doesn't exist
+        os.makedirs(host_temp_dir, mode=0o777, exist_ok=True)
+        
+        # Test write permissions
+        test_file = os.path.join(host_temp_dir, f"test_{uuid.uuid4().hex}")
+        with open(test_file, 'w') as f:
+            f.write("test")
+        os.unlink(test_file)
+        
+        print(f"✅ Using host temp directory: {host_temp_dir}")
+        return host_temp_dir
+        
+    except (OSError, PermissionError) as e:
+        print(f"⚠️ Could not use host temp directory {host_temp_dir}: {e}")
+        print(f"⚠️ Falling back to system temp directory")
+        return tempfile.gettempdir()
 
 
 # Create router

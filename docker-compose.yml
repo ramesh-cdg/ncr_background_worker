@@ -35,7 +35,7 @@ services:
     env_file:
       - .env
     volumes:
-      - ./temp_uploads:/tmp/ncr_uploads:rw  # Host directory for temporary files
+      - ./temp_uploads:/app/temp_uploads:rw  # Host directory mounted to /app/temp_uploads
     restart: unless-stopped
     depends_on:
       - redis
@@ -64,7 +64,7 @@ services:
     env_file:
       - .env
     volumes:
-      - ./temp_uploads:/tmp/ncr_uploads:rw  # Host directory for temporary files
+      - ./temp_uploads:/app/temp_uploads:rw  # Host directory mounted to /app/temp_uploads
     restart: unless-stopped
     depends_on:
       - redis
@@ -158,4 +158,3 @@ services:
 volumes:
   redis_data:
   nginx_logs:
-  temp_files:  # Shared volume for temporary file uploads
