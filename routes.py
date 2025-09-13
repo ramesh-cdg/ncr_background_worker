@@ -707,13 +707,16 @@ async def process_file_upload(
 @router.get("/file-upload-status/{job_id}")
 async def get_file_upload_status(job_id: str):
     """
-    Enhanced file upload status endpoint with comprehensive tracking
+    Get status of a specific file upload job by job_id
     
-    This endpoint provides detailed status information for file upload jobs including:
+    This endpoint provides detailed status information for in-progress file upload jobs including:
     - Real-time processing status
     - Upload progress and validation details
     - File paths and upload counts
     - Error details if any
+    
+    Note: Only returns status for jobs that are currently in progress.
+    Completed or failed jobs will return 404 (similar to job-status endpoint behavior).
     """
     try:
         print(f"🔍 [API] Looking up file upload job: {job_id}")
@@ -727,25 +730,10 @@ async def get_file_upload_status(job_id: str):
         # Get the first matching job (should be only one since we don't keep historical data)
         job = matching_jobs[0]
         
-        # Check if job is in progress
+        # Only return if job is in progress (similar to job-status endpoint)
         in_progress_statuses = ["file_upload_pending", "file_upload_processing"]
         if job.get("status") not in in_progress_statuses:
-            # If not in progress, check if it's completed or failed
-            if job.get("status") in ["file_upload_completed", "file_upload_failed"]:
-                print(f"ℹ️ [API] File upload job {job_id} is finished with status: {job.get('status')}")
-                return {
-                    "job_id": job_id,
-                    "task_id": job.get("task_id", ""),
-                    "celery_task_id": job.get("celery_task_id", ""),
-                    "status": job["status"],
-                    "progress": job.get("progress", {}),
-                    "message": job.get("message", ""),
-                    "timestamp": job.get("timestamp", ""),
-                    "logs": job.get("logs", []),
-                    "finished": True
-                }
-            else:
-                raise HTTPException(status_code=404, detail=f"File upload job {job_id} is not in progress (status: {job.get('status')})")
+            raise HTTPException(status_code=404, detail=f"File upload job {job_id} is not in progress (status: {job.get('status')})")
         
         print(f"✅ [API] Found in-progress file upload job for job_id {job_id}")
         

@@ -532,7 +532,18 @@ def process_file_upload_task(
         # Process delivery file (ZIP) - Enhanced with PHP-like logic
         if delivery_file_path and os.path.exists(delivery_file_path):
             print(f"📦 [UPLOAD TASK {task_id}] Processing delivery file: {delivery_file_path}")
-            redis_manager.update_job_status(task_id, JobStatus.FILE_UPLOAD_PROCESSING, "Processing delivery ZIP file")
+            redis_manager.update_job_status(
+                task_id, 
+                JobStatus.FILE_UPLOAD_PROCESSING, 
+                "Processing delivery ZIP file",
+                {
+                    "current_step": "delivery_file_processing",
+                    "step_description": "Extracting and processing delivery ZIP file",
+                    "files_processed": 0,
+                    "total_files": 0,
+                    "percentage": 0
+                }
+            )
             
             try:
                 # Extract ZIP file to temporary directory
@@ -543,6 +554,20 @@ def process_file_upload_task(
                     zip_ref.extractall(extract_path)
                     file_list = zip_ref.namelist()
                     print(f"   📦 ZIP contains {len(file_list)} files")
+                
+                # Update progress with total file count
+                redis_manager.update_job_status(
+                    task_id, 
+                    JobStatus.FILE_UPLOAD_PROCESSING, 
+                    f"Extracted {len(file_list)} files from ZIP, starting upload",
+                    {
+                        "current_step": "delivery_file_upload",
+                        "step_description": "Uploading extracted files to S3",
+                        "files_processed": 0,
+                        "total_files": len(file_list),
+                        "percentage": 0
+                    }
+                )
                 
                 # Process extracted files recursively (like PHP RecursiveIteratorIterator)
                 upload_success = True
@@ -611,6 +636,22 @@ def process_file_upload_task(
                             upload_success = False
                         
                         processed_files += 1
+                        
+                        # Update progress after each file upload
+                        percentage = int((processed_files / len(file_list)) * 100) if file_list else 0
+                        redis_manager.update_job_status(
+                            task_id, 
+                            JobStatus.FILE_UPLOAD_PROCESSING, 
+                            f"Uploaded {processed_files}/{len(file_list)} files from delivery ZIP",
+                            {
+                                "current_step": "delivery_file_upload",
+                                "step_description": "Uploading extracted files to S3",
+                                "files_processed": processed_files,
+                                "total_files": len(file_list),
+                                "percentage": percentage,
+                                "current_file": os.path.basename(relative_path)
+                            }
+                        )
                 
                 deliverable_validation = "1" if upload_success else "0"
                 print(f"   📊 Delivery processing complete: {processed_files} files, success: {upload_success}")
@@ -636,7 +677,19 @@ def process_file_upload_task(
         # Process USDZ file - Enhanced with PHP-like logic
         if usdz_file_path and os.path.exists(usdz_file_path):
             print(f"📱 [UPLOAD TASK {task_id}] Processing USDZ file: {usdz_file_path}")
-            redis_manager.update_job_status(task_id, JobStatus.FILE_UPLOAD_PROCESSING, "Processing USDZ file")
+            redis_manager.update_job_status(
+                task_id, 
+                JobStatus.FILE_UPLOAD_PROCESSING, 
+                "Processing USDZ file",
+                {
+                    "current_step": "usdz_file_upload",
+                    "step_description": "Uploading USDZ file to S3",
+                    "files_processed": 0,
+                    "total_files": 1,
+                    "percentage": 0,
+                    "current_file": os.path.basename(usdz_file_path)
+                }
+            )
             
             try:
                 # Only process if we don't already have a USDZ path from delivery file
@@ -656,6 +709,21 @@ def process_file_upload_task(
                     
                     # Update job_files table (like PHP database operations)
                     DatabaseManager.update_job_files_table(job_id, usdz_path, current_datetime)
+                    
+                    # Update progress for successful USDZ upload
+                    redis_manager.update_job_status(
+                        task_id, 
+                        JobStatus.FILE_UPLOAD_PROCESSING, 
+                        "USDZ file uploaded successfully",
+                        {
+                            "current_step": "usdz_file_upload",
+                            "step_description": "USDZ file uploaded to S3",
+                            "files_processed": 1,
+                            "total_files": 1,
+                            "percentage": 100,
+                            "current_file": os.path.basename(usdz_file_path)
+                        }
+                    )
                 else:
                     print(f"   ⚠️ USDZ already set from delivery file: {usdz_path}")
                     usdz_validation = "1"
@@ -676,7 +744,19 @@ def process_file_upload_task(
         # Process GLB file - Enhanced with PHP-like logic
         if glb_file_path and os.path.exists(glb_file_path):
             print(f"🎮 [UPLOAD TASK {task_id}] Processing GLB file: {glb_file_path}")
-            redis_manager.update_job_status(task_id, JobStatus.FILE_UPLOAD_PROCESSING, "Processing GLB file")
+            redis_manager.update_job_status(
+                task_id, 
+                JobStatus.FILE_UPLOAD_PROCESSING, 
+                "Processing GLB file",
+                {
+                    "current_step": "glb_file_upload",
+                    "step_description": "Uploading GLB file to S3",
+                    "files_processed": 0,
+                    "total_files": 1,
+                    "percentage": 0,
+                    "current_file": os.path.basename(glb_file_path)
+                }
+            )
             
             try:
                 # Only process if we don't already have a GLB path from delivery file
@@ -696,6 +776,21 @@ def process_file_upload_task(
                     
                     # Update job_files table (like PHP database operations)
                     DatabaseManager.update_job_files_table(job_id, glb_path, current_datetime)
+                    
+                    # Update progress for successful GLB upload
+                    redis_manager.update_job_status(
+                        task_id, 
+                        JobStatus.FILE_UPLOAD_PROCESSING, 
+                        "GLB file uploaded successfully",
+                        {
+                            "current_step": "glb_file_upload",
+                            "step_description": "GLB file uploaded to S3",
+                            "files_processed": 1,
+                            "total_files": 1,
+                            "percentage": 100,
+                            "current_file": os.path.basename(glb_file_path)
+                        }
+                    )
                 else:
                     print(f"   ⚠️ GLB already set from delivery file: {glb_path}")
                     glb_validation = "1"
@@ -723,7 +818,23 @@ def process_file_upload_task(
         
         if deliverable_validation == '1' and usdz_validation == "1" and glb_validation == "1":
             print(f"✅ [UPLOAD TASK {task_id}] All files uploaded successfully")
-            redis_manager.update_job_status(task_id, JobStatus.FILE_UPLOAD_PROCESSING, "Updating database with upload results")
+            redis_manager.update_job_status(
+                task_id, 
+                JobStatus.FILE_UPLOAD_PROCESSING, 
+                "All files uploaded successfully, updating database",
+                {
+                    "current_step": "database_update",
+                    "step_description": "Updating database with upload results",
+                    "files_processed": 0,
+                    "total_files": 0,
+                    "percentage": 0,
+                    "validation_results": {
+                        "deliverable": deliverable_validation,
+                        "usdz": usdz_validation,
+                        "glb": glb_validation
+                    }
+                }
+            )
             
             # Update database with successful upload (matching PHP logic)
             try:
@@ -732,6 +843,20 @@ def process_file_upload_task(
                 cursor = conn.cursor()
                 
                 try:
+                    # Update progress for database operations
+                    redis_manager.update_job_status(
+                        task_id, 
+                        JobStatus.FILE_UPLOAD_PROCESSING, 
+                        "Inserting file upload report",
+                        {
+                            "current_step": "database_update",
+                            "step_description": "Inserting file upload report",
+                            "files_processed": 1,
+                            "total_files": 2,
+                            "percentage": 50
+                        }
+                    )
+                    
                     # Insert file upload report
                     insert_sql = """
                         INSERT INTO file_upload_reports 
@@ -742,6 +867,20 @@ def process_file_upload_task(
                         job_id, sku_id, upload_count, campaign, 'IAPPROVED', 'INTERNAL', 
                         usdz_path, glb_path, current_datetime, current_datetime
                     ))
+                    
+                    # Update progress for job details update
+                    redis_manager.update_job_status(
+                        task_id, 
+                        JobStatus.FILE_UPLOAD_PROCESSING, 
+                        "Updating job details",
+                        {
+                            "current_step": "database_update",
+                            "step_description": "Updating job details",
+                            "files_processed": 2,
+                            "total_files": 2,
+                            "percentage": 100
+                        }
+                    )
                     
                     # Update job_details table (like PHP)
                     update_sql = """
