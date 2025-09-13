@@ -134,6 +134,7 @@ setup_letsencrypt() {
         --agree-tos \
         --no-eff-email \
         --non-interactive \
+        --expand \
         -d $DOMAIN_NAME; then
         
         log "✅ FREE Let's Encrypt certificate obtained successfully!"
