@@ -475,6 +475,14 @@ def process_file_upload_task(
     task_id = self.request.id
     
     try:
+        # Debug: Log all input parameters
+        print(f"🔍 [UPLOAD TASK {task_id}] Input parameters:")
+        print(f"   - job_id: {job_id}")
+        print(f"   - row_id: {row_id}")
+        print(f"   - delivery_file_path: {delivery_file_path}")
+        print(f"   - usdz_file_path: {usdz_file_path}")
+        print(f"   - glb_file_path: {glb_file_path}")
+        
         # Update status to processing
         redis_manager.update_job_status(task_id, JobStatus.FILE_UPLOAD_PROCESSING, "Initializing file upload processing")
         
@@ -728,6 +736,11 @@ def process_file_upload_task(
             print(f"📱 [UPLOAD TASK {task_id}] No USDZ file provided - validation set to 1")
         
         # Process GLB file - Following exact PHP pattern
+        print(f"🔍 [UPLOAD TASK {task_id}] GLB file processing check:")
+        print(f"   - glb_file_path: {glb_file_path}")
+        print(f"   - glb_file_path exists: {glb_file_path and os.path.exists(glb_file_path) if glb_file_path else False}")
+        print(f"   - Current glb_path: {glb_path}")
+        
         if glb_file_path and os.path.exists(glb_file_path):
             print(f"🎮 [UPLOAD TASK {task_id}] Processing GLB file: {glb_file_path}")
             
