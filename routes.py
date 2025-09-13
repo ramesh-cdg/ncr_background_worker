@@ -556,6 +556,14 @@ async def process_file_upload(
         print(f"   - USDZ file: {usdz_file.filename if usdz_file else 'None'}")
         print(f"   - GLB file: {glb_file.filename if glb_file else 'None'}")
         
+        # Debug: Check file types and content types
+        if delivery_file:
+            print(f"   🔍 Delivery file details: filename='{delivery_file.filename}', content_type='{delivery_file.content_type}'")
+        if usdz_file:
+            print(f"   🔍 USDZ file details: filename='{usdz_file.filename}', content_type='{usdz_file.content_type}'")
+        if glb_file:
+            print(f"   🔍 GLB file details: filename='{glb_file.filename}', content_type='{glb_file.content_type}'")
+        
         # Validate that at least one file was provided
         if not any([delivery_file, usdz_file, glb_file]):
             raise HTTPException(status_code=400, detail="No files provided for upload")
@@ -569,9 +577,11 @@ async def process_file_upload(
         ]:
             file_type, file, allowed_extensions = file_info
             if file:
+                print(f"   🔍 Validating {file_type} file: {file.filename}")
                 # Check file extension
                 if file.filename:
                     file_ext = os.path.splitext(file.filename)[1].lower()
+                    print(f"   🔍 File extension: {file_ext}, Allowed: {allowed_extensions}")
                     if file_ext not in allowed_extensions:
                         raise HTTPException(
                             status_code=400, 
@@ -621,6 +631,7 @@ async def process_file_upload(
         try:
             # Save delivery file with validation
             if delivery_file:
+                print(f"   🔍 Processing delivery file: {delivery_file.filename}")
                 temp_delivery = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
                 content = await delivery_file.read()
                 temp_delivery.write(content)
@@ -630,12 +641,14 @@ async def process_file_upload(
                 
                 # Validate ZIP file
                 try:
+                    print(f"   🔍 Attempting to validate as ZIP file...")
                     with zipfile.ZipFile(temp_delivery.name, 'r') as zip_ref:
                         file_list = zip_ref.namelist()
                         print(f"   📦 ZIP contains {len(file_list)} files")
                         if len(file_list) == 0:
                             raise HTTPException(status_code=400, detail="ZIP file is empty")
-                except zipfile.BadZipFile:
+                except zipfile.BadZipFile as e:
+                    print(f"   ❌ ZIP validation failed: {e}")
                     raise HTTPException(status_code=400, detail="Invalid ZIP file format")
             
             # Save USDZ file with validation
@@ -649,6 +662,7 @@ async def process_file_upload(
             
             # Save GLB file with validation
             if glb_file:
+                print(f"   🔍 Processing GLB file: {glb_file.filename}")
                 temp_glb = tempfile.NamedTemporaryFile(delete=False, suffix='.glb')
                 content = await glb_file.read()
                 temp_glb.write(content)
@@ -657,6 +671,11 @@ async def process_file_upload(
                 print(f"   ✅ GLB file saved to: {temp_glb.name} ({len(content)} bytes)")
             
             # Start enhanced Celery task
+            print(f"🔍 [API] Starting Celery task with file paths:")
+            print(f"   - delivery_file_path: {temp_files.get('delivery')}")
+            print(f"   - usdz_file_path: {temp_files.get('usdz')}")
+            print(f"   - glb_file_path: {temp_files.get('glb')}")
+            
             celery_result = process_file_upload_task.delay(
                 job_id=job_id,
                 row_id=row_id,
@@ -689,13 +708,10 @@ async def process_file_upload(
             )
             
         finally:
-            # Clean up temporary files after task is started
-            for temp_file in temp_files.values():
-                try:
-                    os.unlink(temp_file)
-                    print(f"   🧹 Cleaned up temp file: {temp_file}")
-                except Exception as e:
-                    print(f"   ⚠️ Failed to clean up temp file {temp_file}: {e}")
+            # Note: Do NOT clean up temporary files here - they are needed by the async Celery task
+            # The Celery task will clean them up after processing
+            print(f"   📝 Temporary files will be cleaned up by the Celery task after processing")
+            pass
         
     except HTTPException:
         raise
