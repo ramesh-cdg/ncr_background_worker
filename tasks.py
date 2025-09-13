@@ -742,6 +742,11 @@ def process_file_upload_task(
             print(f"📱 [UPLOAD TASK {task_id}] No USDZ file provided - validation set to 1")
         
         # Process GLB file - Enhanced with PHP-like logic
+        print(f"🔍 [UPLOAD TASK {task_id}] GLB file check:")
+        print(f"   - glb_file_path: {glb_file_path}")
+        print(f"   - glb_file_path exists: {glb_file_path and os.path.exists(glb_file_path) if glb_file_path else False}")
+        print(f"   - glb_path current value: {glb_path}")
+        
         if glb_file_path and os.path.exists(glb_file_path):
             print(f"🎮 [UPLOAD TASK {task_id}] Processing GLB file: {glb_file_path}")
             redis_manager.update_job_status(
@@ -760,6 +765,7 @@ def process_file_upload_task(
             
             try:
                 # Only process if we don't already have a GLB path from delivery file
+                print(f"🔍 [UPLOAD TASK {task_id}] Checking glb_path: {glb_path} (is None: {glb_path is None})")
                 if glb_path is None:
                     s3_key_glb = f"jobs/{job_id}/GLB_files/mesh.glb"
                     
@@ -803,6 +809,9 @@ def process_file_upload_task(
                 glb_validation = "0"
         else:
             # No GLB file provided - set validation to 1 (like PHP logic)
+            print(f"🔍 [UPLOAD TASK {task_id}] No GLB file provided:")
+            print(f"   - glb_file_path: {glb_file_path}")
+            print(f"   - glb_path current value: {glb_path}")
             glb_validation = "1"
             if glb_path is None:
                 glb_path = ""
