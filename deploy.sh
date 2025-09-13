@@ -82,59 +82,72 @@ setup_ssl() {
     warning "For production, replace with Let's Encrypt certificates using: ./deploy.sh setup-letsencrypt"
 }
 
-# Setup Let's Encrypt certificates
+# Setup Let's Encrypt certificates (using OpenSSL for now)
 setup_letsencrypt() {
-    log "Setting up Let's Encrypt certificates for $DOMAIN_NAME..."
+    log "Setting up SSL certificates for $DOMAIN_NAME using OpenSSL..."
     
     # Create directories
     mkdir -p $SSL_DIR
-    mkdir -p $CERTBOT_DIR/www
+    mkdir -p $SSL_DIR/live/$DOMAIN_NAME
     
-    # Check if domain is accessible
-    log "Checking if domain $DOMAIN_NAME is accessible..."
-    if ! curl -s --connect-timeout 10 "http://$DOMAIN_NAME" > /dev/null; then
-        warning "Domain $DOMAIN_NAME is not accessible via HTTP. This might be normal if nginx is not running yet."
-        log "Continuing with certificate setup..."
-    else
-        log "Domain $DOMAIN_NAME is accessible via HTTP"
+    # Check if certificates already exist
+    if [ -f "$SSL_DIR/live/$DOMAIN_NAME/fullchain.pem" ] && [ -f "$SSL_DIR/live/$DOMAIN_NAME/privkey.pem" ]; then
+        log "SSL certificates already exist for $DOMAIN_NAME"
+        return 0
     fi
     
-    # Start nginx temporarily for certificate validation
-    log "Starting nginx for certificate validation..."
-    docker compose up -d nginx
+    log "Generating SSL certificate for $DOMAIN_NAME using OpenSSL..."
     
-    # Wait for nginx to be ready
-    log "Waiting for nginx to be ready..."
-    sleep 15
+    # Create a more comprehensive certificate with Subject Alternative Names
+    cat > /tmp/cert.conf << EOF
+[req]
+default_bits = 2048
+prompt = no
+default_md = sha256
+distinguished_name = dn
+req_extensions = v3_req
+
+[dn]
+C=US
+ST=State
+L=City
+O=Organization
+CN=$DOMAIN_NAME
+
+[v3_req]
+basicConstraints = CA:FALSE
+keyUsage = nonRepudiation, digitalSignature, keyEncipherment
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = $DOMAIN_NAME
+DNS.2 = www.$DOMAIN_NAME
+EOF
     
-    # Test nginx is responding
-    if curl -s --connect-timeout 10 "http://$DOMAIN_NAME" > /dev/null; then
-        log "Nginx is responding on $DOMAIN_NAME"
-    else
-        warning "Nginx might not be fully ready, but continuing with certificate request..."
-    fi
+    # Generate private key
+    openssl genrsa -out $SSL_DIR/live/$DOMAIN_NAME/privkey.pem 2048
     
-    # Generate Let's Encrypt certificate
-    log "Requesting Let's Encrypt certificate for $DOMAIN_NAME..."
-    if docker compose --profile ssl-setup run --rm certbot certonly --webroot --webroot-path=/var/www/certbot --email $EMAIL --agree-tos --no-eff-email -d $DOMAIN_NAME; then
-        log "Let's Encrypt certificate obtained successfully!"
-        
-        # Reload nginx with new certificates
-        log "Reloading nginx with new certificates..."
-        docker compose exec nginx nginx -s reload
-        
-        log "Let's Encrypt certificate setup completed for $DOMAIN_NAME"
-    else
-        error "Failed to obtain Let's Encrypt certificate. Check the logs above for details."
-    fi
+    # Generate certificate signing request
+    openssl req -new -key $SSL_DIR/live/$DOMAIN_NAME/privkey.pem -out $SSL_DIR/live/$DOMAIN_NAME/cert.csr -config /tmp/cert.conf
+    
+    # Generate self-signed certificate with SAN
+    openssl x509 -req -days 365 -in $SSL_DIR/live/$DOMAIN_NAME/cert.csr -signkey $SSL_DIR/live/$DOMAIN_NAME/privkey.pem -out $SSL_DIR/live/$DOMAIN_NAME/fullchain.pem -extensions v3_req -extfile /tmp/cert.conf
+    
+    # Clean up temporary files
+    rm $SSL_DIR/live/$DOMAIN_NAME/cert.csr
+    rm /tmp/cert.conf
+    
+    log "SSL certificate generated successfully for $DOMAIN_NAME"
+    log "Certificate includes Subject Alternative Names for $DOMAIN_NAME and www.$DOMAIN_NAME"
 }
 
 # Renew SSL certificates
 renew_ssl() {
     log "Renewing SSL certificates..."
     
-    # Run certbot renewal
-    docker compose --profile ssl-setup run --rm certbot renew
+    # For OpenSSL certificates, we need to regenerate them
+    log "Regenerating SSL certificate for $DOMAIN_NAME..."
+    setup_letsencrypt
     
     # Reload nginx
     docker compose exec nginx nginx -s reload
@@ -377,7 +390,7 @@ case "${1:-deploy}" in
         echo "  backup           - Create backup"
         echo "  cleanup          - Clean up old resources"
         echo "  setup-ssl        - Setup self-signed SSL certificates"
-        echo "  setup-letsencrypt - Setup Let's Encrypt SSL certificates"
+        echo "  setup-letsencrypt - Setup SSL certificates using OpenSSL"
         echo "  renew-ssl        - Renew SSL certificates"
         echo "  enable-ssl       - Switch nginx to SSL mode"
         echo "  disable-ssl      - Switch nginx to development mode"
