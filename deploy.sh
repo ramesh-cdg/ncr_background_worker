@@ -93,7 +93,10 @@ setup_letsencrypt() {
     # Check if domain is accessible
     log "Checking if domain $DOMAIN_NAME is accessible..."
     if ! curl -s --connect-timeout 10 "http://$DOMAIN_NAME" > /dev/null; then
-        error "Domain $DOMAIN_NAME is not accessible. Please ensure DNS is pointing to this server."
+        warning "Domain $DOMAIN_NAME is not accessible via HTTP. This might be normal if nginx is not running yet."
+        log "Continuing with certificate setup..."
+    else
+        log "Domain $DOMAIN_NAME is accessible via HTTP"
     fi
     
     # Start nginx temporarily for certificate validation
@@ -101,17 +104,29 @@ setup_letsencrypt() {
     docker compose up -d nginx
     
     # Wait for nginx to be ready
-    sleep 10
+    log "Waiting for nginx to be ready..."
+    sleep 15
+    
+    # Test nginx is responding
+    if curl -s --connect-timeout 10 "http://$DOMAIN_NAME" > /dev/null; then
+        log "Nginx is responding on $DOMAIN_NAME"
+    else
+        warning "Nginx might not be fully ready, but continuing with certificate request..."
+    fi
     
     # Generate Let's Encrypt certificate
-    log "Requesting Let's Encrypt certificate..."
-    docker compose --profile ssl-setup run --rm certbot
-    
-    # Reload nginx with new certificates
-    log "Reloading nginx with new certificates..."
-    docker compose exec nginx nginx -s reload
-    
-    log "Let's Encrypt certificate setup completed for $DOMAIN_NAME"
+    log "Requesting Let's Encrypt certificate for $DOMAIN_NAME..."
+    if docker compose --profile ssl-setup run --rm certbot; then
+        log "Let's Encrypt certificate obtained successfully!"
+        
+        # Reload nginx with new certificates
+        log "Reloading nginx with new certificates..."
+        docker compose exec nginx nginx -s reload
+        
+        log "Let's Encrypt certificate setup completed for $DOMAIN_NAME"
+    else
+        error "Failed to obtain Let's Encrypt certificate. Check the logs above for details."
+    fi
 }
 
 # Renew SSL certificates
