@@ -674,59 +674,28 @@ def process_file_upload_task(
             deliverable_validation = "1"
             print(f"📦 [UPLOAD TASK {task_id}] No delivery file provided - validation set to 1")
         
-        # Process USDZ file - Enhanced with PHP-like logic
+        # Process USDZ file - Following exact PHP pattern
         if usdz_file_path and os.path.exists(usdz_file_path):
             print(f"📱 [UPLOAD TASK {task_id}] Processing USDZ file: {usdz_file_path}")
-            redis_manager.update_job_status(
-                task_id, 
-                JobStatus.FILE_UPLOAD_PROCESSING, 
-                "Processing USDZ file",
-                {
-                    "current_step": "usdz_file_upload",
-                    "step_description": "Uploading USDZ file to S3",
-                    "files_processed": 0,
-                    "total_files": 1,
-                    "percentage": 0,
-                    "current_file": os.path.basename(usdz_file_path)
-                }
-            )
+            
+            source_path_usdz = usdz_file_path
+            file_name_usdz = "mesh.usdz"
+            s3_key_usdz = f"jobs/{job_id}/usdz_files/{file_name_usdz}"
             
             try:
-                # Only process if we don't already have a USDZ path from delivery file
-                if usdz_path is None:
-                    s3_key_usdz = f"jobs/{job_id}/usdz_files/mesh.usdz"
-                    
-                    s3_client.upload_file(
-                        usdz_file_path,
-                        settings.bucket_name,
-                        s3_key_usdz,
-                        ExtraArgs={'ACL': 'private'}
-                    )
-                    
-                    usdz_path = s3_key_usdz
-                    usdz_validation = "1"
-                    print(f"   ✅ USDZ uploaded: {s3_key_usdz}")
-                    
-                    # Update job_files table (like PHP database operations)
-                    DatabaseManager.update_job_files_table(job_id, usdz_path, current_datetime)
-                    
-                    # Update progress for successful USDZ upload
-                    redis_manager.update_job_status(
-                        task_id, 
-                        JobStatus.FILE_UPLOAD_PROCESSING, 
-                        "USDZ file uploaded successfully",
-                        {
-                            "current_step": "usdz_file_upload",
-                            "step_description": "USDZ file uploaded to S3",
-                            "files_processed": 1,
-                            "total_files": 1,
-                            "percentage": 100,
-                            "current_file": os.path.basename(usdz_file_path)
-                        }
-                    )
-                else:
-                    print(f"   ⚠️ USDZ already set from delivery file: {usdz_path}")
-                    usdz_validation = "1"
+                s3_client.upload_file(
+                    source_path_usdz,
+                    settings.bucket_name,
+                    s3_key_usdz,
+                    ExtraArgs={'ACL': 'private'}
+                )
+                
+                usdz_path = s3_key_usdz
+                usdz_validation = "1"
+                print(f"   ✅ USDZ uploaded: {s3_key_usdz}")
+                
+                # Update job_files table (like PHP database operations)
+                DatabaseManager.update_job_files_table(job_id, usdz_path, current_datetime)
                 
             except ClientError as e:
                 print(f"   ❌ USDZ S3 upload failed: {e}")
@@ -741,65 +710,28 @@ def process_file_upload_task(
                 usdz_path = ""
             print(f"📱 [UPLOAD TASK {task_id}] No USDZ file provided - validation set to 1")
         
-        # Process GLB file - Enhanced with PHP-like logic
-        print(f"🔍 [UPLOAD TASK {task_id}] GLB file check:")
-        print(f"   - glb_file_path: {glb_file_path}")
-        print(f"   - glb_file_path exists: {glb_file_path and os.path.exists(glb_file_path) if glb_file_path else False}")
-        print(f"   - glb_path current value: {glb_path}")
-        
+        # Process GLB file - Following exact PHP pattern
         if glb_file_path and os.path.exists(glb_file_path):
             print(f"🎮 [UPLOAD TASK {task_id}] Processing GLB file: {glb_file_path}")
-            redis_manager.update_job_status(
-                task_id, 
-                JobStatus.FILE_UPLOAD_PROCESSING, 
-                "Processing GLB file",
-                {
-                    "current_step": "glb_file_upload",
-                    "step_description": "Uploading GLB file to S3",
-                    "files_processed": 0,
-                    "total_files": 1,
-                    "percentage": 0,
-                    "current_file": os.path.basename(glb_file_path)
-                }
-            )
+            
+            source_path_glb = glb_file_path
+            file_name_glb = "mesh.glb"
+            s3_key_glb = f"jobs/{job_id}/GLB_files/{file_name_glb}"
             
             try:
-                # Only process if we don't already have a GLB path from delivery file
-                print(f"🔍 [UPLOAD TASK {task_id}] Checking glb_path: {glb_path} (is None: {glb_path is None})")
-                if glb_path is None:
-                    s3_key_glb = f"jobs/{job_id}/GLB_files/mesh.glb"
-                    
-                    s3_client.upload_file(
-                        glb_file_path,
-                        settings.bucket_name,
-                        s3_key_glb,
-                        ExtraArgs={'ACL': 'private'}
-                    )
-                    
-                    glb_path = s3_key_glb
-                    glb_validation = "1"
-                    print(f"   ✅ GLB uploaded: {s3_key_glb}")
-                    
-                    # Update job_files table (like PHP database operations)
-                    DatabaseManager.update_job_files_table(job_id, glb_path, current_datetime)
-                    
-                    # Update progress for successful GLB upload
-                    redis_manager.update_job_status(
-                        task_id, 
-                        JobStatus.FILE_UPLOAD_PROCESSING, 
-                        "GLB file uploaded successfully",
-                        {
-                            "current_step": "glb_file_upload",
-                            "step_description": "GLB file uploaded to S3",
-                            "files_processed": 1,
-                            "total_files": 1,
-                            "percentage": 100,
-                            "current_file": os.path.basename(glb_file_path)
-                        }
-                    )
-                else:
-                    print(f"   ⚠️ GLB already set from delivery file: {glb_path}")
-                    glb_validation = "1"
+                s3_client.upload_file(
+                    source_path_glb,
+                    settings.bucket_name,
+                    s3_key_glb,
+                    ExtraArgs={'ACL': 'private'}
+                )
+                
+                glb_path = s3_key_glb
+                glb_validation = "1"
+                print(f"   ✅ GLB uploaded: {s3_key_glb}")
+                
+                # Update job_files table (like PHP database operations)
+                DatabaseManager.update_job_files_table(job_id, glb_path, current_datetime)
                 
             except ClientError as e:
                 print(f"   ❌ GLB S3 upload failed: {e}")
@@ -809,9 +741,6 @@ def process_file_upload_task(
                 glb_validation = "0"
         else:
             # No GLB file provided - set validation to 1 (like PHP logic)
-            print(f"🔍 [UPLOAD TASK {task_id}] No GLB file provided:")
-            print(f"   - glb_file_path: {glb_file_path}")
-            print(f"   - glb_path current value: {glb_path}")
             glb_validation = "1"
             if glb_path is None:
                 glb_path = ""
