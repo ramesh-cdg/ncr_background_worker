@@ -512,6 +512,7 @@ def process_file_upload_task(
         glb_validation = "1"
         
         # Initialize file paths (like PHP - start as None/null)
+        # These will be set during delivery file processing or individual file processing
         usdz_path = None
         glb_path = None
         
@@ -589,22 +590,22 @@ def process_file_upload_task(
                         
                         if extension == '.glb':
                             if glb_path is None:
-                                # First GLB file becomes the main GLB file
+                                # First GLB file becomes the main GLB file (matching PHP logic)
                                 glb_path = f"jobs/{job_id}/GLB_files/mesh.glb"
                                 s3_key = glb_path
                                 print(f"      🎮 Set as main GLB file: {s3_key}")
                             else:
-                                # Additional GLB files go to Delivery_files
+                                # Additional GLB files go to Delivery_files (matching PHP logic)
                                 s3_key = f"jobs/{job_id}/Delivery_files/{relative_path}"
                                 print(f"      🎮 Additional GLB file: {s3_key}")
                         elif extension == '.usdz':
                             if usdz_path is None:
-                                # First USDZ file becomes the main USDZ file
+                                # First USDZ file becomes the main USDZ file (matching PHP logic)
                                 usdz_path = f"jobs/{job_id}/usdz_files/mesh.usdz"
                                 s3_key = usdz_path
                                 print(f"      📱 Set as main USDZ file: {s3_key}")
                             else:
-                                # Additional USDZ files go to Delivery_files
+                                # Additional USDZ files go to Delivery_files (matching PHP logic)
                                 s3_key = f"jobs/{job_id}/Delivery_files/{relative_path}"
                                 print(f"      📱 Additional USDZ file: {s3_key}")
                         else:
@@ -690,6 +691,7 @@ def process_file_upload_task(
                     ExtraArgs={'ACL': 'private'}
                 )
                 
+                # Set usdz_path (matching PHP logic exactly)
                 usdz_path = s3_key_usdz
                 usdz_validation = "1"
                 print(f"   ✅ USDZ uploaded: {s3_key_usdz}")
@@ -726,6 +728,7 @@ def process_file_upload_task(
                     ExtraArgs={'ACL': 'private'}
                 )
                 
+                # Set glb_path (matching PHP logic exactly)
                 glb_path = s3_key_glb
                 glb_validation = "1"
                 print(f"   ✅ GLB uploaded: {s3_key_glb}")
@@ -820,13 +823,23 @@ def process_file_upload_task(
                         }
                     )
                     
-                    # Update job_details table (like PHP)
-                    update_sql = """
-                        UPDATE job_details 
-                        SET job_status = 'WIP', is_uploaded = 1, updateTime = %s 
-                        WHERE id = %s
-                    """
-                    cursor.execute(update_sql, (current_datetime, row_id))
+                    # Update job_details table (like PHP - using row_id if available, otherwise job_id)
+                    if row_id:
+                        update_sql = """
+                            UPDATE job_details 
+                            SET job_status = 'WIP', is_uploaded = 1, updateTime = %s 
+                            WHERE id = %s
+                        """
+                        cursor.execute(update_sql, (current_datetime, row_id))
+                        print(f"   📝 Updated job_details using row_id: {row_id}")
+                    else:
+                        update_sql = """
+                            UPDATE job_details 
+                            SET job_status = 'WIP', is_uploaded = 1, updateTime = %s 
+                            WHERE job_id = %s
+                        """
+                        cursor.execute(update_sql, (current_datetime, job_id))
+                        print(f"   📝 Updated job_details using job_id: {job_id}")
                     
                     conn.commit()
                     print(f"   ✅ Database updated successfully")
