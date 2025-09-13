@@ -511,9 +511,9 @@ def process_file_upload_task(
         usdz_validation = "1"
         glb_validation = "1"
         
-        # Initialize file paths
-        usdz_path = ""
-        glb_path = ""
+        # Initialize file paths (like PHP - start as None/null)
+        usdz_path = None
+        glb_path = None
         
         # Get current datetime
         current_datetime = redis_manager.get_current_ny_time_str()
@@ -588,7 +588,7 @@ def process_file_upload_task(
                         s3_key = ""
                         
                         if extension == '.glb':
-                            if not glb_path:
+                            if glb_path is None:
                                 # First GLB file becomes the main GLB file
                                 glb_path = f"jobs/{job_id}/GLB_files/mesh.glb"
                                 s3_key = glb_path
@@ -598,7 +598,7 @@ def process_file_upload_task(
                                 s3_key = f"jobs/{job_id}/Delivery_files/{relative_path}"
                                 print(f"      🎮 Additional GLB file: {s3_key}")
                         elif extension == '.usdz':
-                            if not usdz_path:
+                            if usdz_path is None:
                                 # First USDZ file becomes the main USDZ file
                                 usdz_path = f"jobs/{job_id}/usdz_files/mesh.usdz"
                                 s3_key = usdz_path
@@ -693,7 +693,7 @@ def process_file_upload_task(
             
             try:
                 # Only process if we don't already have a USDZ path from delivery file
-                if not usdz_path:
+                if usdz_path is None:
                     s3_key_usdz = f"jobs/{job_id}/usdz_files/mesh.usdz"
                     
                     s3_client.upload_file(
@@ -737,7 +737,7 @@ def process_file_upload_task(
         else:
             # No USDZ file provided - set validation to 1 (like PHP logic)
             usdz_validation = "1"
-            if not usdz_path:
+            if usdz_path is None:
                 usdz_path = ""
             print(f"📱 [UPLOAD TASK {task_id}] No USDZ file provided - validation set to 1")
         
@@ -760,7 +760,7 @@ def process_file_upload_task(
             
             try:
                 # Only process if we don't already have a GLB path from delivery file
-                if not glb_path:
+                if glb_path is None:
                     s3_key_glb = f"jobs/{job_id}/GLB_files/mesh.glb"
                     
                     s3_client.upload_file(
@@ -804,7 +804,7 @@ def process_file_upload_task(
         else:
             # No GLB file provided - set validation to 1 (like PHP logic)
             glb_validation = "1"
-            if not glb_path:
+            if glb_path is None:
                 glb_path = ""
             print(f"🎮 [UPLOAD TASK {task_id}] No GLB file provided - validation set to 1")
         
