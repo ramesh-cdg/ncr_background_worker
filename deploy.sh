@@ -82,77 +82,97 @@ setup_ssl() {
     warning "For production, replace with Let's Encrypt certificates using: ./deploy.sh setup-letsencrypt"
 }
 
-# Setup Let's Encrypt certificates (using OpenSSL for now)
+# Setup Let's Encrypt certificates (FREE SSL for production)
 setup_letsencrypt() {
-    log "Setting up SSL certificates for $DOMAIN_NAME using OpenSSL..."
+    log "Setting up FREE Let's Encrypt SSL certificates for $DOMAIN_NAME..."
     
     # Create directories
     mkdir -p $SSL_DIR
-    mkdir -p $SSL_DIR/live/$DOMAIN_NAME
+    mkdir -p $CERTBOT_DIR/www
     
     # Check if certificates already exist
     if [ -f "$SSL_DIR/live/$DOMAIN_NAME/fullchain.pem" ] && [ -f "$SSL_DIR/live/$DOMAIN_NAME/privkey.pem" ]; then
-        log "SSL certificates already exist for $DOMAIN_NAME"
+        log "Let's Encrypt certificates already exist for $DOMAIN_NAME"
         return 0
     fi
     
-    log "Generating SSL certificate for $DOMAIN_NAME using OpenSSL..."
+    # Check if domain is accessible
+    log "Checking if domain $DOMAIN_NAME is accessible..."
+    if ! curl -s --connect-timeout 10 "http://$DOMAIN_NAME" > /dev/null; then
+        warning "Domain $DOMAIN_NAME is not accessible via HTTP. This might be normal if nginx is not running yet."
+        log "Continuing with certificate setup..."
+    else
+        log "Domain $DOMAIN_NAME is accessible via HTTP"
+    fi
     
-    # Create a more comprehensive certificate with Subject Alternative Names
-    cat > /tmp/cert.conf << EOF
-[req]
-default_bits = 2048
-prompt = no
-default_md = sha256
-distinguished_name = dn
-req_extensions = v3_req
-
-[dn]
-C=US
-ST=State
-L=City
-O=Organization
-CN=$DOMAIN_NAME
-
-[v3_req]
-basicConstraints = CA:FALSE
-keyUsage = nonRepudiation, digitalSignature, keyEncipherment
-subjectAltName = @alt_names
-
-[alt_names]
-DNS.1 = $DOMAIN_NAME
-DNS.2 = www.$DOMAIN_NAME
-EOF
+    # Start nginx temporarily for certificate validation
+    log "Starting nginx for Let's Encrypt certificate validation..."
+    docker compose up -d nginx
     
-    # Generate private key
-    openssl genrsa -out $SSL_DIR/live/$DOMAIN_NAME/privkey.pem 2048
+    # Wait for nginx to be ready
+    log "Waiting for nginx to be ready..."
+    sleep 15
     
-    # Generate certificate signing request
-    openssl req -new -key $SSL_DIR/live/$DOMAIN_NAME/privkey.pem -out $SSL_DIR/live/$DOMAIN_NAME/cert.csr -config /tmp/cert.conf
+    # Test nginx is responding
+    if curl -s --connect-timeout 10 "http://$DOMAIN_NAME" > /dev/null; then
+        log "Nginx is responding on $DOMAIN_NAME"
+    else
+        warning "Nginx might not be fully ready, but continuing with certificate request..."
+    fi
     
-    # Generate self-signed certificate with SAN
-    openssl x509 -req -days 365 -in $SSL_DIR/live/$DOMAIN_NAME/cert.csr -signkey $SSL_DIR/live/$DOMAIN_NAME/privkey.pem -out $SSL_DIR/live/$DOMAIN_NAME/fullchain.pem -extensions v3_req -extfile /tmp/cert.conf
+    # Generate Let's Encrypt certificate using certbot
+    log "Requesting FREE Let's Encrypt certificate for $DOMAIN_NAME..."
+    log "This will validate domain ownership and generate a trusted SSL certificate..."
     
-    # Clean up temporary files
-    rm $SSL_DIR/live/$DOMAIN_NAME/cert.csr
-    rm /tmp/cert.conf
-    
-    log "SSL certificate generated successfully for $DOMAIN_NAME"
-    log "Certificate includes Subject Alternative Names for $DOMAIN_NAME and www.$DOMAIN_NAME"
+    if docker run --rm \
+        -v "$(pwd)/ssl:/etc/letsencrypt" \
+        -v "$(pwd)/certbot/www:/var/www/certbot" \
+        certbot/certbot certonly \
+        --webroot \
+        --webroot-path=/var/www/certbot \
+        --email $EMAIL \
+        --agree-tos \
+        --no-eff-email \
+        --force-renewal \
+        -d $DOMAIN_NAME; then
+        
+        log "✅ FREE Let's Encrypt certificate obtained successfully!"
+        log "Certificate is valid for 90 days and will auto-renew"
+        
+        # Reload nginx with new certificates
+        log "Reloading nginx with new certificates..."
+        docker compose exec nginx nginx -s reload
+        
+        log "Let's Encrypt certificate setup completed for $DOMAIN_NAME"
+        log "Your site now has a FREE, trusted SSL certificate!"
+    else
+        error "Failed to obtain Let's Encrypt certificate. Check the logs above for details."
+        log "Common issues:"
+        log "1. Domain DNS not pointing to this server"
+        log "2. Port 80 not accessible from internet"
+        log "3. Firewall blocking Let's Encrypt validation"
+    fi
 }
 
 # Renew SSL certificates
 renew_ssl() {
-    log "Renewing SSL certificates..."
+    log "Renewing Let's Encrypt SSL certificates..."
     
-    # For OpenSSL certificates, we need to regenerate them
-    log "Regenerating SSL certificate for $DOMAIN_NAME..."
-    setup_letsencrypt
-    
-    # Reload nginx
-    docker compose exec nginx nginx -s reload
-    
-    log "SSL certificate renewal completed"
+    # Run Let's Encrypt certificate renewal
+    if docker run --rm \
+        -v "$(pwd)/ssl:/etc/letsencrypt" \
+        -v "$(pwd)/certbot/www:/var/www/certbot" \
+        certbot/certbot renew; then
+        
+        log "✅ Let's Encrypt certificates renewed successfully!"
+        
+        # Reload nginx
+        docker compose exec nginx nginx -s reload
+        
+        log "SSL certificate renewal completed"
+    else
+        error "Failed to renew Let's Encrypt certificates"
+    fi
 }
 
 # Switch nginx to SSL mode
@@ -390,7 +410,7 @@ case "${1:-deploy}" in
         echo "  backup           - Create backup"
         echo "  cleanup          - Clean up old resources"
         echo "  setup-ssl        - Setup self-signed SSL certificates"
-        echo "  setup-letsencrypt - Setup SSL certificates using OpenSSL"
+        echo "  setup-letsencrypt - Setup FREE Let's Encrypt SSL certificates"
         echo "  renew-ssl        - Renew SSL certificates"
         echo "  enable-ssl       - Switch nginx to SSL mode"
         echo "  disable-ssl      - Switch nginx to development mode"
