@@ -12,7 +12,7 @@ backlog = 2048
 workers = int(os.getenv('GUNICORN_WORKERS', multiprocessing.cpu_count() * 2 + 1))
 worker_class = os.getenv('GUNICORN_WORKER_CLASS', 'uvicorn.workers.UvicornWorker')
 worker_connections = 1000
-timeout = 120
+timeout = 1800  # 30 minutes for large file uploads
 keepalive = 2
 
 # Restart workers after this many requests, to help prevent memory leaks

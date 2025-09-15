@@ -35,3 +35,4 @@ echo ""
 echo "📁 Host directory: $(pwd)/temp_uploads"
 echo "🐳 Container path: /app/temp_uploads"
 echo ""
+

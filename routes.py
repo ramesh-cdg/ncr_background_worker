@@ -594,7 +594,7 @@ async def process_file_upload(
             raise HTTPException(status_code=400, detail="No files provided for upload")
         
         # Validate file types and sizes
-        max_file_size = 100 * 1024 * 1024  # 100MB limit
+        max_file_size = 5 * 1024 * 1024 * 1024  # 5GB limit
         for file_info in [
             ("delivery", delivery_file, [".zip"]),
             ("usdz", usdz_file, [".usdz"]),
