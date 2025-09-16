@@ -57,10 +57,21 @@ class ValidationService:
             print(f"   - Response status code: {response.status_code}")
             print(f"   - Response headers: {dict(response.headers)}")
             
+            # Get current NY time
+            current_datetime = redis_manager.get_current_ny_time_str()
+            print(f"   - Current datetime: {current_datetime}")
+
             if response.status_code != 200:
                 print(f"❌ [VALIDATOR] HTTP error: {response.status_code}")
                 print(f"   - Response text: {response.text}")
                 
+                # print(f"❌ [VALIDATOR] Validation failed: {result_value}")
+                # Update job_details table for failed validation
+                DatabaseManager.update_job_details_for_failed_validation(
+                    job_id, current_datetime, row_id
+                )
+                print("❌ [VALIDATOR] Database updated for invalid validation")
+
                 # Log failed validation request to database
                 print(f"🗄️ [VALIDATOR] Logging failed validation request...")
                 DatabaseManager.save_validation_failed_request(
@@ -72,7 +83,7 @@ class ValidationService:
                     campaign=campaign,
                     row_id=row_id
                 )
-                
+            
                 return False
             
             response_data = response.json()
@@ -89,11 +100,7 @@ class ValidationService:
             result_value = parsed["data"][0]["result"]
             
             print(f"   - Validation result: {result_value}")
-            
-            # Get current NY time
-            current_datetime = redis_manager.get_current_ny_time_str()
-            print(f"   - Current datetime: {current_datetime}")
-            
+                        
             if result_value == 'Valid' or result_value == 'Warning':
                 print(f"✅ [VALIDATOR] Validation passed: {result_value}")
                 # Update job_details table for successful validation
